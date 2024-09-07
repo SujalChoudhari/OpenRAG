@@ -1,101 +1,161 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useState, useRef, useEffect } from 'react'
+import { useChat } from 'ai/react'
+import { Send, ArrowDown } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { motion, AnimatePresence } from 'framer-motion'
+import Markdown from "react-markdown"
+
+export default function ChatInterface() {
+  const { messages, input, handleInputChange, handleSubmit } = useChat({
+    keepLastMessageOnError: true,
+  })
+
+  const [isTyping, setIsTyping] = useState(false)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+
+  const handleSubmitWrapper = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (input.trim()) {
+      setIsTyping(true)
+      handleSubmit(e)
+      setTimeout(() => setIsTyping(false), Math.random() * 1000 + 500) // Simulate typing
+    }
+  }
+
+  const scrollToBottom = () => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
+    }
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, isTyping])
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (scrollAreaRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef.current
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 1
+        setShowScrollButton(!isAtBottom)
+      }
+    }
+
+    const scrollArea = scrollAreaRef.current
+    if (scrollArea) {
+      scrollArea.addEventListener('scroll', handleScroll)
+    }
+
+    return () => {
+      if (scrollArea) {
+        scrollArea.removeEventListener('scroll', handleScroll)
+      }
+    }
+  }, [])
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <div className="flex items-center justify-center min-h-screen bg-gray-900 p-8">
+      <div className="w-full max-w-4xl bg-gray-800 rounded-lg shadow-lg border-4 border-gray-700 overflow-hidden">
+        <header className="p-6 bg-gray-800 border-b border-gray-700">
+          <h1 className="text-3xl font-bold text-gray-100">Chat Interface</h1>
+        </header>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+        <div className="relative">
+          <ScrollArea className="h-[calc(100vh-14rem)] p-6" ref={scrollAreaRef}>
+            <AnimatePresence initial={false}>
+              {messages.map(message => (
+                <motion.div
+                  key={message.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-6`}
+                >
+                  <div className={`flex items-end ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <Avatar className="w-12 h-12">
+                      <AvatarFallback>{message.role === 'user' ? 'U' : 'AI'}</AvatarFallback>
+                      <AvatarImage src={message.role === 'user' ? "/placeholder-user.jpg" : "/placeholder-ai.jpg"} />
+                    </Avatar>
+                    <div
+                      className={`max-w-md mx-3 p-5 rounded-lg shadow-md ${message.role === 'user'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-gray-700 text-gray-100'
+                        }`}
+                    >
+                      <Markdown className="text-lg">{message.content}</Markdown>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            {isTyping && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex justify-start mb-6"
+              >
+                <div className="flex items-end">
+                  <Avatar className="w-12 h-12">
+                    <AvatarFallback>AI</AvatarFallback>
+                    <AvatarImage src="/placeholder-ai.jpg" />
+                  </Avatar>
+                  <div className="max-w-md mx-3 p-5 rounded-lg bg-gray-700 shadow-md">
+                    <span className="typing-indicator">
+                      <span className="dot"></span>
+                      <span className="dot"></span>
+                      <span className="dot"></span>
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </ScrollArea>
+
+          <AnimatePresence>
+            {showScrollButton && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute bottom-4 left-1/2 transform -translate-x-1/2"
+              >
+                <Button
+                  onClick={scrollToBottom}
+                  size="sm"
+                  className="bg-purple-600 hover:bg-purple-700 text-white rounded-full px-4 py-2 shadow-lg flex items-center space-x-2"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                  <span>Scroll to Bottom</span>
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <form onSubmit={handleSubmitWrapper} className="p-6 bg-gray-800 border-t border-gray-700">
+          <div className="flex items-center space-x-3">
+            <Input
+              type="text"
+              placeholder="Type a message..."
+              value={input}
+              onChange={handleInputChange}
+              className="flex-grow bg-gray-700 text-gray-100 text-lg placeholder-gray-400"
+            />
+            <Button type="submit" size="icon" className="bg-purple-600 hover:bg-purple-700 text-white w-12 h-12">
+              <Send className="h-6 w-6" />
+              <span className="sr-only">Send</span>
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
-  );
-}
+  )
+} 
