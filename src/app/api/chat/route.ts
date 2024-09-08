@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     messages[messages.length - 1].data = context;
 
     const ollama = createOllama({
-        baseURL: 'http://192.168.1.43:11434/api',
+        baseURL: 'http://localhost:11434/api',
     })
     const result = await streamText({
         model: ollama('qwen2:0.5b'),
