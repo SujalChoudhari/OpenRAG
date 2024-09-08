@@ -1,8 +1,8 @@
 "use server";
 
 import fs from "fs";
-import { removeEmbedding, storeEmbedding } from "./utils/sqliteEmbeddings";
 import { LoadDocuments } from "./utils/loadDocs";
+import { removeEmbedding } from "./utils/sqliteEmbeddings";
 
 // get file list function not dirs
 export async function getFiles() {
