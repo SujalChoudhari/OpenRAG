@@ -98,3 +98,6 @@ OpenRAG is a Retrieval-Augmented Generation (RAG) system designed to provide int
 
 Contributions are welcome! Please fork the repository, make your changes, and submit a pull request.
 
+## License
+
+This project is licensed under the MIT license. See the LICENSE file for more information.
