@@ -2,16 +2,21 @@ import fs from 'fs';
 import path from 'path';
 import { Message } from '../types';
 
-const DATA_DIR = path.join(process.cwd(), '_data');
+export const DATA_DIR = path.join(process.cwd(), '_data');
+export const UPLOAD_DIR = path.join(DATA_DIR, 'upload');
 
 // Create the data directory if it doesn't exist
 if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR);
 }
 
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR);
+}
+
 // Generate a new unique file for each session
 const timeStamp = `_${new Date().getFullYear()}_${new Date().getDate()}_${new Date().getMonth()}_${new Date().getHours()}_${new Date().getMinutes()}`;
-const sessionFileName = `chat_history_${timeStamp}.md`;
+const sessionFileName = `History${timeStamp}.md`;
 const CHAT_HISTORY_FILE = path.join(DATA_DIR, sessionFileName);
 
 // Create the session file if it doesn't exist
