@@ -1,6 +1,5 @@
 'use client'
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useChat } from 'ai/react'
@@ -11,7 +10,7 @@ import Markdown from "react-markdown"
 import { addContent, getFiles, removeFile } from './actions'
 
 export default function ChatInterface() {
-  const { messages, input, handleInputChange, handleSubmit } = useChat({
+  const { messages, input, handleInputChange, handleSubmit,setMessages } = useChat({
     keepLastMessageOnError: true,
     onResponse: () => {
       setIsTyping(false);
@@ -88,6 +87,7 @@ export default function ChatInterface() {
 
   const resetChat = () => {
     setFiles([]);
+    setMessages([]);
   };
 
   return (
@@ -133,7 +133,7 @@ export default function ChatInterface() {
       {/* Chat Interface */}
       <div className="flex-1 bg-gray-800 rounded-r-lg shadow-lg border-l-0 border-gray-700 overflow-hidden">
         <header className="p-6 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-cyan-400">Atom</h1>
+          <h1 className="text-3xl font-bold text-cyan-400">OpenRAG</h1>
           <Button onClick={resetChat} className="bg-cyan-600 hover:bg-cyan-700 text-white">
             <RefreshCcwIcon className="h-5 w-5" />
           </Button>
@@ -151,10 +151,6 @@ export default function ChatInterface() {
                 className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`flex items-end ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <Avatar className="w-10 h-10">
-                    <AvatarFallback>{message.role === 'user' ? 'U' : 'AI'}</AvatarFallback>
-                    <AvatarImage src={message.role === 'user' ? "/placeholder-user.jpg" : "/placeholder-ai.jpg"} />
-                  </Avatar>
                   <div
                     className={`max-w-md mx-3 p-4 rounded-lg shadow-md ${message.role === 'user'
                       ? 'bg-cyan-600 text-white'
@@ -176,19 +172,15 @@ export default function ChatInterface() {
               className="flex justify-start"
             >
               <div className="flex items-end">
-                <Avatar className="w-10 h-10">
-                  <AvatarFallback>AI</AvatarFallback>
-                  <AvatarImage src="/placeholder-ai.jpg" />
-                </Avatar>
                 <div >
-                <span className="text-sm text-gray-300 pl-4">{typingMessage}</span>
-                <div className="max-w-md mx-3 p-4 rounded-lg bg-gray-700 shadow-md">
-                  <span className="flex space-x-2">
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-75"></span>
-                    <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-150"></span>
-                  </span>
-                </div>
+                  <span className="text-sm text-gray-300 pl-4">{typingMessage}</span>
+                  <div className="max-w-md mx-3 p-4 rounded-lg bg-gray-700 shadow-md">
+                    <span className="flex space-x-2">
+                      <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
+                      <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-75"></span>
+                      <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-150"></span>
+                    </span>
+                  </div>
                 </div>
               </div>
             </motion.div>
