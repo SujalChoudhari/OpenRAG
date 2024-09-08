@@ -12,6 +12,9 @@ OpenRAG is a Retrieval-Augmented Generation (RAG) system designed to provide int
 - [Contributing](#contributing)
 - [License](#license)
 
+![Screenshot](./screenshot.png)
+
+
 ## Features
 
 - **Vector Database**: Uses `sqlite3` to store and query text embeddings.
