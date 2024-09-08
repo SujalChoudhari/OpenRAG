@@ -14,7 +14,6 @@
     "@radix-ui/react-slot": "^1.1.0",
     "ai": "^3.3.28",
     "axios": "^1.7.7",
-    "better-sqlite3": "^11.2.1",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.5.4",
@@ -28,8 +27,7 @@
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
     "tailwind-merge": "^2.5.2",
-    "tailwindcss-animate": "^1.0.7",
-    "vector-storage": "^1.0.55"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
