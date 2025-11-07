@@ -33,10 +33,10 @@ export async function POST(req: Request) {
     messages[messages.length - 1].data = context;
 
     const ollama = createOllama({
-        baseURL: 'http://localhost:11434/api',
+        baseURL: process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434/api',
     })
     const result = await streamText({
-        model: ollama('qwen2:0.5b'),
+        model: ollama('deepseek-coder-v2'),
         system: systemPrompt(context),
         messages: convertToCoreMessages(messages),
     });

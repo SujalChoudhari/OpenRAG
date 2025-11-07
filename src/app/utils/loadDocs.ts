@@ -4,8 +4,7 @@ import { storeEmbedding } from "./sqliteEmbeddings";
 const fs = require('fs').promises;
 const path = require('path');
 
-
-const VALID_FILE_EXTS = ['.md', '.txt'];
+const VALID_FILE_EXTS = ['.md', '.txt', '.html', '.csv'];
 
 export type ExtractDocument = {
     name: string;
