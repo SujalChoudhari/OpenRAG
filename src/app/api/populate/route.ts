@@ -1,5 +1,6 @@
-import { LoadDocuments } from "@/app/utils/loadDocs";
-import { storeEmbedding } from "@/app/utils/sqliteEmbeddings";
+import { DocumentProcessor } from "@/lib/document-processor";
+import { storeEmbedding } from "@/lib/vector-store";
+import { CONFIG } from "@/lib/config";
 import { NextRequest, NextResponse } from "next/server";
 
 
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-    const loadDocs = new LoadDocuments('_data');
-    loadDocs.loadDocuments();
+    const docProcessor = new DocumentProcessor(CONFIG.DATA_DIR);
+    docProcessor.loadDocuments();
     return NextResponse.json({ message: 'Embeddings loaded successfully' });
 }
