@@ -3,71 +3,74 @@ import path from 'path';
 import { Message } from '../app/types';
 import { CONFIG } from './config';
 
+const SESSIONS_DIR = path.join(CONFIG.DATA_DIR, 'sessions');
+
 // Ensure directories exist
-if (!fs.existsSync(CONFIG.DATA_DIR)) {
-    fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
+if (!fs.existsSync(SESSIONS_DIR)) {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 }
 
-if (!fs.existsSync(CONFIG.UPLOAD_DIR)) {
-    fs.mkdirSync(CONFIG.UPLOAD_DIR, { recursive: true });
+export interface ChatSession {
+    id: string;
+    title: string;
+    createdAt: number;
+    messages: Message[];
 }
 
-// Generate a new unique file for each session
-// Note: This logic creates a new file every time the module is loaded (server restart/cold start).
-// Ideally this should be session-based, but keeping original behavior for now.
-const timeStamp = `_${new Date().getFullYear()}_${new Date().getDate()}_${new Date().getMonth()}_${new Date().getHours()}_${new Date().getMinutes()}`;
-const sessionFileName = `History${timeStamp}.md`;
-const CHAT_HISTORY_FILE = path.join(CONFIG.DATA_DIR, sessionFileName);
-
-// Create the session file if it doesn't exist
-if (!fs.existsSync(CHAT_HISTORY_FILE)) {
-    fs.writeFileSync(CHAT_HISTORY_FILE, '');
+export function createSession(id: string, title: string = 'New Chat'): ChatSession {
+    const session: ChatSession = {
+        id,
+        title,
+        createdAt: Date.now(),
+        messages: []
+    };
+    saveSession(session);
+    return session;
 }
 
-export async function storeMessage(message: Message, resetFile = false): Promise<void> {
-    const formattedMessage = `${message.role.toUpperCase()}: ${JSON.stringify(message.content)}\n\n`;
-
+export function getSession(id: string): ChatSession | null {
+    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
+    if (!fs.existsSync(filePath)) return null;
     try {
-        if (resetFile) {
-            fs.writeFileSync(CHAT_HISTORY_FILE, formattedMessage);
-        } else {
-            fs.appendFileSync(CHAT_HISTORY_FILE, formattedMessage);
-        }
+        const data = fs.readFileSync(filePath, 'utf-8');
+        return JSON.parse(data);
     } catch (error) {
-        console.error('Error storing message:', error);
+        console.error(`Error reading session ${id}:`, error);
+        return null;
     }
 }
 
-export async function clearMessages(): Promise<void> {
+export function saveSession(session: ChatSession): void {
+    const filePath = path.join(SESSIONS_DIR, `${session.id}.json`);
     try {
-        fs.writeFileSync(CHAT_HISTORY_FILE, '');
+        fs.writeFileSync(filePath, JSON.stringify(session, null, 2));
     } catch (error) {
-        console.error('Error clearing messages:', error);
+        console.error(`Error saving session ${session.id}:`, error);
     }
 }
 
-export function getHistoryFiles(): string[] {
+export function getAllSessions(): ChatSession[] {
     try {
-        if (!fs.existsSync(CONFIG.DATA_DIR)) return [];
-        return fs.readdirSync(CONFIG.DATA_DIR)
-            .filter(file => file.startsWith('History') && file.endsWith('.md'))
-            .sort((a, b) => {
-                return fs.statSync(path.join(CONFIG.DATA_DIR, b)).mtime.getTime() -
-                    fs.statSync(path.join(CONFIG.DATA_DIR, a)).mtime.getTime();
-            });
+        if (!fs.existsSync(SESSIONS_DIR)) return [];
+        const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+        return files.map(file => {
+            try {
+                const data = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
+                return JSON.parse(data);
+            } catch (e) {
+                return null;
+            }
+        }).filter((s): s is ChatSession => s !== null)
+            .sort((a, b) => b.createdAt - a.createdAt);
     } catch (error) {
-        console.error('Error getting history files:', error);
+        console.error('Error getting all sessions:', error);
         return [];
     }
 }
 
-export function getHistoryContent(fileName: string): string {
-    try {
-        const filePath = path.join(CONFIG.DATA_DIR, fileName);
-        if (!fs.existsSync(filePath)) return '';
-        return fs.readFileSync(filePath, 'utf-8');
-    } catch (error) {
-        console.error('Error reading history file:', error);
-        return '';
+export function deleteSession(id: string): void {
+    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
+    if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
     }
 }

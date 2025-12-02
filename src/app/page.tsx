@@ -1,22 +1,25 @@
 'use client'
 
-import { addContent, getFiles, removeFile } from './actions'
+import { getFiles, removeFile } from './actions'
 import { useChat } from 'ai/react'
 import { useEffect, useState } from 'react'
 import { Sidebar } from '@/components/sidebar'
 import { ChatArea } from '@/components/chat-area'
 
 export default function ChatInterface() {
-  const { messages, input, handleInputChange, handleSubmit, setMessages } = useChat({
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [files, setFiles] = useState<string[]>([]);
+  const [typingMessage, setTypingMessage] = useState<string>('');
+  const [uploadLogs, setUploadLogs] = useState<string[]>([]);
+
+  const { messages, input, handleInputChange, handleSubmit, setMessages, data } = useChat({
     keepLastMessageOnError: true,
+    body: { sessionId },
     onResponse: () => {
       setIsTyping(false);
     }
   });
-
-  const [isTyping, setIsTyping] = useState(false);
-  const [files, setFiles] = useState<string[]>([]);
-  const [typingMessage, setTypingMessage] = useState<string>('');
 
   const typingMessages = [
     "Looking into the databases...",
@@ -51,24 +54,42 @@ export default function ChatInterface() {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newFiles = event.target.files;
+    if (!newFiles || newFiles.length === 0) return;
 
-    if (newFiles) {
-      const newFileNames = Array.from(newFiles).map(file => file.name);
-      setFiles(prevFiles => [...prevFiles, ...newFileNames]);
+    setUploadLogs([]);
+    const formData = new FormData();
+    Array.from(newFiles).forEach(file => {
+      formData.append('files', file);
+    });
 
-      const filesWithContent = Array.from(newFiles).map(async file => {
-        const content = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsText(file);
-        });
-
-        return { name: file.name, content };
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
       });
 
-      const uploadedFiles = await Promise.all(filesWithContent);
-      await addContent(uploadedFiles);
+      if (!response.body) return;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim());
+
+        setUploadLogs(prev => [...prev, ...lines]);
+      }
+
+      // Refresh file list
+      const updatedFiles = await getFiles();
+      setFiles(updatedFiles);
+
+    } catch (error) {
+      console.error('Upload failed:', error);
+      setUploadLogs(prev => [...prev, `Error: ${error}`]);
     }
   };
 
@@ -80,15 +101,38 @@ export default function ChatInterface() {
   const resetChat = () => {
     setMessages([]);
     setIsTyping(false);
+    setSessionId(null); // Clear session ID to start fresh
+  };
+
+  const loadSession = async (id: string) => {
+    try {
+      setMessages([]); // Clear current messages first
+      setIsTyping(false);
+
+      const res = await fetch(`/api/history/${id}`);
+      if (res.ok) {
+        const session = await res.json();
+        setSessionId(session.id);
+        // Small delay to ensure state updates don't conflict
+        setTimeout(() => {
+          setMessages(session.messages);
+        }, 0);
+      }
+    } catch (error) {
+      console.error('Failed to load session:', error);
+    }
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-cyan-500/30">
+    <div className="flex min-h-screen bg-black text-gray-100 font-sans selection:bg-rose-500/30">
       <Sidebar
         files={files}
         onUpload={handleFileUpload}
         onDelete={deleteFile}
         onReset={resetChat}
+        onSelectSession={loadSession}
+        currentSessionId={sessionId}
+        uploadLogs={uploadLogs}
       />
       <ChatArea
         messages={messages}
@@ -97,6 +141,8 @@ export default function ChatInterface() {
         handleSubmit={handleSubmitWrapper}
         isTyping={isTyping}
         typingMessage={typingMessage}
+        files={files}
+        data={data}
       />
     </div>
   )

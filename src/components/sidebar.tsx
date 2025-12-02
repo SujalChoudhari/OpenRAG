@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { File, Trash2, Upload, PlusCircle } from 'lucide-react';
+import { File, Trash2, Upload, PlusCircle, MessageSquare } from 'lucide-react';
 import * as React from 'react';
 import { useRef } from 'react';
 import { SettingsDialog } from "./settings-dialog";
@@ -12,17 +12,33 @@ interface SidebarProps {
     onUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
     onDelete: (fileName: string) => void;
     onReset: () => void;
+    onSelectSession: (id: string) => void;
+    currentSessionId: string | null;
+    uploadLogs: string[];
 }
 
-export function Sidebar({ files, onUpload, onDelete, onReset }: SidebarProps) {
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [historyFiles, setHistoryFiles] = React.useState<string[]>([]);
+interface ChatSession {
+    id: string;
+    title: string;
+    createdAt: number;
+}
 
-    React.useEffect(() => {
+export function Sidebar({ files, onUpload, onDelete, onReset, onSelectSession, currentSessionId, uploadLogs }: SidebarProps) {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [sessions, setSessions] = React.useState<ChatSession[]>([]);
+
+    const fetchSessions = () => {
         fetch('/api/history')
             .then(res => res.json())
-            .then(data => setHistoryFiles(data.files || []))
+            .then(data => setSessions(data.sessions || []))
             .catch(err => console.error('Failed to load history:', err));
+    };
+
+    React.useEffect(() => {
+        fetchSessions();
+        // Poll for updates every 5 seconds to catch new titles
+        const interval = setInterval(fetchSessions, 5000);
+        return () => clearInterval(interval);
     }, []);
 
     const triggerFileUpload = () => {
@@ -30,94 +46,147 @@ export function Sidebar({ files, onUpload, onDelete, onReset }: SidebarProps) {
     };
 
     return (
-        <div className="w-80 bg-gray-900/50 backdrop-blur-xl border-r border-white/10 flex flex-col h-screen">
+        <div className="w-80 bg-black/40 backdrop-blur-xl border-r border-white/10 flex flex-col h-screen">
             <div className="p-6 border-b border-white/10 flex items-center justify-between">
-                <h2 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                <h2 className="text-xl font-bold bg-gradient-to-r from-rose-500 to-amber-500 bg-clip-text text-transparent">
                     OpenRAG
                 </h2>
                 <div className="flex gap-2">
-                    <Button onClick={onReset} variant="ghost" size="icon" className="text-gray-400 hover:text-white" title="New Chat">
+                    <Button onClick={onReset} variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-white/5" title="New Chat">
                         <PlusCircle className="h-5 w-5" />
                     </Button>
                     <SettingsDialog />
                 </div>
             </div>
 
-            <div className="p-4">
-                <Button
-                    onClick={triggerFileUpload}
-                    className="w-full bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 backdrop-blur-sm transition-all duration-300"
-                >
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload Document
-                </Button>
-                <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={onUpload}
-                    className="hidden"
-                    multiple
-                />
-            </div>
-
-            <ScrollArea className="flex-1 px-4">
-                <div className="space-y-6">
+            <ScrollArea className="flex-1">
+                <div className="p-4 space-y-6">
+                    {/* Files Section */}
                     <div>
-                        <div className="px-2 py-2">
-                            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                                 Knowledge Base
                             </h3>
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={onUpload}
+                                className="hidden"
+                                multiple
+                                accept=".txt,.md,.pdf,.json"
+                            />
+                            <Button
+                                onClick={triggerFileUpload}
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs border-white/10 hover:bg-white/5 hover:text-rose-400"
+                            >
+                                <Upload className="h-3 w-3 mr-2" />
+                                Add Files
+                            </Button>
                         </div>
+
                         <div className="space-y-2">
-                            {files.length === 0 && (
-                                <div className="text-center text-gray-500 text-sm py-4 italic">
-                                    No documents
+                            {files.length === 0 ? (
+                                <div className="text-center py-8 border-2 border-dashed border-white/5 rounded-lg">
+                                    <File className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+                                    <p className="text-xs text-gray-500">No files uploaded</p>
                                 </div>
-                            )}
-                            {files.map((file, index) => (
-                                <div
-                                    key={index}
-                                    className="group flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 transition-all duration-200"
-                                >
-                                    <div className="flex items-center overflow-hidden">
-                                        <File className="mr-3 h-4 w-4 text-cyan-400 flex-shrink-0" />
-                                        <span className="text-sm text-gray-300 truncate" title={file}>
-                                            {file}
-                                        </span>
-                                    </div>
-                                    <Button
-                                        onClick={() => onDelete(file)}
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-gray-500 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                            ) : (
+                                files.map((file) => (
+                                    <div
+                                        key={file}
+                                        className="group flex items-center justify-between p-2 rounded-md hover:bg-white/5 transition-colors border border-transparent hover:border-white/5"
                                     >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            ))}
+                                        <div className="flex items-center overflow-hidden">
+                                            <File className="h-4 w-4 text-rose-500 mr-2 flex-shrink-0" />
+                                            <span className="text-sm text-gray-300 truncate" title={file}>
+                                                {file}
+                                            </span>
+                                        </div>
+                                        <Button
+                                            onClick={() => onDelete(file)}
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-opacity"
+                                        >
+                                            <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
 
-                    <div>
-                        <div className="px-2 py-2">
-                            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                                Chat History
+                    {/* Upload Logs Section */}
+                    {uploadLogs.length > 0 && (
+                        <div className="px-4 py-2 border-t border-white/10">
+                            <h3 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">
+                                Upload Progress
                             </h3>
+                            <div className="space-y-1">
+                                {(() => {
+                                    const lastLog = uploadLogs[uploadLogs.length - 1];
+                                    if (!lastLog) return null;
+
+                                    const match = lastLog.match(/chunk (\d+)\/(\d+)/);
+                                    let progress = 0;
+                                    let statusText = lastLog;
+
+                                    if (match) {
+                                        const current = parseInt(match[1]);
+                                        const total = parseInt(match[2]);
+                                        progress = (current / total) * 100;
+                                        statusText = `Processing chunk ${current}/${total}`;
+                                    } else if (lastLog.includes("All files processed successfully")) {
+                                        progress = 100;
+                                        statusText = "Complete";
+                                    } else if (lastLog.startsWith("Error")) {
+                                        statusText = "Error";
+                                        progress = 100;
+                                    }
+
+                                    if (statusText === "Complete") return null;
+
+                                    return (
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between text-xs text-gray-400">
+                                                <span>{statusText}</span>
+                                                <span>{Math.round(progress)}%</span>
+                                            </div>
+                                            <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full transition-all duration-300 ease-out ${statusText === 'Error' ? 'bg-red-500' : 'bg-rose-500'}`}
+                                                    style={{ width: `${progress}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            {historyFiles.length === 0 && (
-                                <div className="text-center text-gray-500 text-sm py-4 italic">
-                                    No history
-                                </div>
-                            )}
-                            {historyFiles.map((file, index) => (
+                    )}
+
+                    {/* History Section */}
+                    <div>
+                        <h3 className="text-xs font-semibold text-gray-400 mb-4 uppercase tracking-wider">
+                            History
+                        </h3>
+                        <div className="space-y-1">
+                            {sessions.map((session) => (
                                 <div
-                                    key={index}
-                                    className="group flex items-center p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 transition-all duration-200 cursor-pointer"
+                                    key={session.id}
+                                    onClick={() => onSelectSession(session.id)}
+                                    className={`flex items-center p-2 rounded-md cursor-pointer transition-colors ${currentSessionId === session.id
+                                        ? 'bg-rose-500/10 border border-rose-500/20'
+                                        : 'hover:bg-white/5 border border-transparent'
+                                        }`}
                                 >
-                                    <File className="mr-3 h-4 w-4 text-purple-400 flex-shrink-0" />
-                                    <span className="text-sm text-gray-300 truncate" title={file}>
-                                        {file.replace('History_', '').replace('.md', '').replace(/_/g, ' ')}
+                                    <MessageSquare className={`mr-3 h-4 w-4 flex-shrink-0 ${currentSessionId === session.id ? 'text-rose-400' : 'text-gray-400'
+                                        }`} />
+                                    <span className={`text-sm truncate ${currentSessionId === session.id ? 'text-rose-100' : 'text-gray-300'
+                                        }`} title={session.title}>
+                                        {session.title}
                                     </span>
                                 </div>
                             ))}

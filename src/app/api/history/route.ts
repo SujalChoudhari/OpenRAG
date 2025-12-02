@@ -1,7 +1,7 @@
-import { getHistoryFiles } from '@/lib/chat-history';
+import { getAllSessions } from '@/lib/chat-history';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-    const files = getHistoryFiles();
-    return NextResponse.json({ files });
+    const sessions = getAllSessions();
+    return NextResponse.json({ sessions });
 }

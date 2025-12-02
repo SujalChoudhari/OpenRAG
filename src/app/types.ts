@@ -1,5 +1,7 @@
-// types.ts
 export interface Message {
-    role: 'user' | 'ai';
+    id?: string;
+    role: 'user' | 'assistant' | 'system' | 'data' | 'ai';
     content: string;
+    data?: any;
+    annotations?: any[];
 }

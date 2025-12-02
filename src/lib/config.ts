@@ -14,9 +14,9 @@ export const CONFIG = {
     },
 
     // Document processing
-    MAX_WORDS_PER_DOC: 300,
+    MAX_WORDS_PER_DOC: 1500,
     CHUNK_OVERLAP: 0, // Future proofing
 
     // Search
-    TOP_K_RESULTS: 3,
+    TOP_K_RESULTS: 5,
 };

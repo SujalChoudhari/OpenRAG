@@ -33,18 +33,36 @@ export class DocumentProcessor {
                 if (file.isDirectory()) {
                     // If it's a directory, go deeper, reducing depth by 1
                     await this.loadDocuments(fullPath, depth - 1);
-                } else if (file.isFile() && VALID_FILE_EXTS.includes(path.extname(file.name))) {
-                    // If it's a supported file, process it
-                    const content = await fs.readFile(fullPath, 'utf-8');
-                    const processedContent = this.preprocessText(content);
-                    const docs = this.splitIntoChunks(file.name, processedContent);
-                    for (const doc of docs) {
-                        await storeEmbedding(doc.content, doc.name);
-                    }
+                } else if (file.isFile()) {
+                    await this.processFile(fullPath);
                 }
             }
         } catch (error) {
             console.error(`Error loading documents from ${directory}:`, error);
+        }
+    }
+
+    async processFile(filePath: string, onProgress?: (msg: string) => void) {
+        try {
+            const fileName = path.basename(filePath);
+            if (onProgress) onProgress(`Reading ${fileName}...`);
+
+            const content = await fs.readFile(filePath, 'utf-8');
+            const processedContent = this.preprocessText(content);
+
+            if (onProgress) onProgress(`Chunking ${fileName}...`);
+            const docs = this.splitIntoChunks(fileName, processedContent);
+
+            let i = 0;
+            for (const doc of docs) {
+                i++;
+                if (onProgress) onProgress(`Embedding ${fileName} chunk ${i}/${docs.length}...`);
+                await storeEmbedding(doc.content, doc.name);
+            }
+            if (onProgress) onProgress(`Finished processing ${fileName}`);
+        } catch (err) {
+            console.warn(`Skipping file ${filePath} (not text or unreadable):`, err);
+            if (onProgress) onProgress(`Error processing ${path.basename(filePath)}: ${err}`);
         }
     }
 
@@ -54,13 +72,90 @@ export class DocumentProcessor {
 
     splitIntoChunks(fileName: string, content: string) {
         const docs: ExtractDocument[] = [];
-        for (let i = 0; i < content.length; i += this.maxWordsPerDoc) {
-            const chunk = content.slice(i, i + this.maxWordsPerDoc);
-            docs.push({
-                name: `${fileName}_chunk_${Math.floor(i / this.maxWordsPerDoc) + 1}`,
-                content: chunk
-            });
+        const chunkSize = this.maxWordsPerDoc; // Treating as characters for better control
+        const overlap = 50; // Character overlap
+
+        // Simple recursive splitting strategy
+        const splitText = (text: string): string[] => {
+            if (text.length <= chunkSize) return [text];
+
+            const separators = ['\n\n', '\n', '. ', ' '];
+            let separator = '';
+            let splitIndex = -1;
+
+            for (const sep of separators) {
+                // Find the last occurrence of separator within the chunk limit
+                const limit = text.substring(0, chunkSize).lastIndexOf(sep);
+                if (limit !== -1) {
+                    splitIndex = limit;
+                    separator = sep;
+                    break;
+                }
+            }
+
+            if (splitIndex === -1) {
+                // Force split if no separator found
+                splitIndex = chunkSize;
+            }
+
+            const chunk = text.substring(0, splitIndex);
+            const remaining = text.substring(splitIndex + separator.length);
+
+            // Add overlap to the remaining part for the next chunk
+            const nextChunkStart = Math.max(0, splitIndex - overlap);
+            const nextText = text.substring(nextChunkStart);
+
+            // Avoid infinite recursion if we're not making progress
+            if (nextText.length >= text.length) {
+                return [text.substring(0, chunkSize), ...splitText(text.substring(chunkSize))];
+            }
+
+            return [chunk, ...splitText(remaining)];
+        };
+
+        // Better implementation: Iterative approach with overlap
+        let start = 0;
+        let chunkIndex = 1;
+
+        while (start < content.length) {
+            let end = start + chunkSize;
+
+            if (end >= content.length) {
+                end = content.length;
+            } else {
+                // Try to find a natural break point
+                const lookback = Math.min(100, chunkSize * 0.2); // Look back 20% or 100 chars
+                const textWindow = content.substring(end - lookback, end);
+
+                const breakPoints = ['\n\n', '\n', '. ', ' '];
+                let foundBreak = false;
+
+                for (const bp of breakPoints) {
+                    const lastIndex = textWindow.lastIndexOf(bp);
+                    if (lastIndex !== -1) {
+                        end = end - lookback + lastIndex + bp.length;
+                        foundBreak = true;
+                        break;
+                    }
+                }
+            }
+
+            const chunkText = content.substring(start, end).trim();
+            if (chunkText.length > 0) {
+                docs.push({
+                    name: `${fileName}_chunk_${chunkIndex++}`,
+                    content: chunkText
+                });
+            }
+
+            // Move start forward, but keep overlap
+            start = end - overlap;
+
+            // Prevent infinite loop if overlap is too big or no progress
+            if (start <= 0) start = end; // Should not happen with logic above but safety
+            if (end === content.length) break;
         }
+
         return docs;
     }
 
