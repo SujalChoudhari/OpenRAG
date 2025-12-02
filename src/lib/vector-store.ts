@@ -43,6 +43,33 @@ export async function storeEmbedding(text: string, id: string) {
     console.log(`New embedding created and stored for id ${id}`);
 }
 
+export async function storeCollection(id: string, name: string, summary: string) {
+    const db = await getDb();
+    const embedding = await createEmbedding(summary);
+    await db.run(
+        'INSERT OR REPLACE INTO collections (id, name, summary, embedding) VALUES (?, ?, ?, ?)',
+        [id, name, summary, Buffer.from(new Float32Array(embedding.embeddings[0]).buffer)]
+    );
+}
+
+export async function storeDocument(id: string, collectionId: string, summary: string, originalText: string) {
+    const db = await getDb();
+    const embedding = await createEmbedding(summary);
+    await db.run(
+        'INSERT OR REPLACE INTO documents (id, collection_id, summary, embedding, original_text) VALUES (?, ?, ?, ?, ?)',
+        [id, collectionId, summary, Buffer.from(new Float32Array(embedding.embeddings[0]).buffer), originalText]
+    );
+}
+
+export async function storeChunk(id: string, documentId: string, summary: string, originalText: string) {
+    const db = await getDb();
+    const embedding = await createEmbedding(summary);
+    await db.run(
+        'INSERT OR REPLACE INTO chunks (id, document_id, summary, embedding, original_text) VALUES (?, ?, ?, ?, ?)',
+        [id, documentId, summary, Buffer.from(new Float32Array(embedding.embeddings[0]).buffer), originalText]
+    );
+}
+
 export async function removeEmbedding(filename: string) {
     const db = await getDb();
     console.log(`Removing embeddings for file: ${filename}`);
@@ -74,4 +101,55 @@ export async function similaritySearch(query: string, topK = CONFIG.TOP_K_RESULT
 
     // Sort by similarity and return top K
     return results.sort((a, b) => b.similarity - a.similarity).slice(0, topK);
+}
+
+export async function hierarchicalSearch(query: string) {
+    const settings = getSettings();
+    const db = await getDb();
+    const queryEmbedding = await createEmbedding(query);
+    const queryVector = new Float32Array(queryEmbedding.embeddings[0]);
+
+    // Stage 1: Search Collections
+    const collections = await db.all('SELECT id, name, summary, embedding FROM collections');
+    const collectionScores = collections.map(c => ({
+        ...c,
+        score: dotProduct(queryVector, new Float32Array(c.embedding.buffer))
+    })).sort((a, b) => b.score - a.score).slice(0, settings.retrievalCollectionCount);
+
+    const topCollectionIds = collectionScores.map(c => c.id);
+    if (topCollectionIds.length === 0) return { bestDocument: null, topChunks: [] };
+
+    // Stage 2: Search Documents within top Collections
+    const placeholders = topCollectionIds.map(() => '?').join(',');
+    const documents = await db.all(
+        `SELECT id, collection_id, summary, embedding, original_text FROM documents WHERE collection_id IN (${placeholders})`,
+        topCollectionIds
+    );
+
+    const documentScores = documents.map(d => ({
+        ...d,
+        score: dotProduct(queryVector, new Float32Array(d.embedding.buffer))
+    })).sort((a, b) => b.score - a.score).slice(0, settings.retrievalDocumentCount);
+
+    const topDocumentIds = documentScores.map(d => d.id);
+    if (topDocumentIds.length === 0) return { bestDocument: null, topChunks: [] };
+
+    // Stage 3: Search Chunks within top Documents
+    const docPlaceholders = topDocumentIds.map(() => '?').join(',');
+    const chunks = await db.all(
+        `SELECT id, document_id, summary, embedding, original_text FROM chunks WHERE document_id IN (${docPlaceholders})`,
+        topDocumentIds
+    );
+
+    const chunkScores = chunks.map(c => ({
+        ...c,
+        score: dotProduct(queryVector, new Float32Array(c.embedding.buffer))
+    })).sort((a, b) => b.score - a.score).slice(0, settings.retrievalChunkCount);
+
+    const bestDocument = documentScores[0];
+
+    return {
+        bestDocument,
+        topChunks: chunkScores
+    };
 }

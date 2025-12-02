@@ -45,6 +45,25 @@ export function Sidebar({ files, onUpload, onDelete, onReset, onSelectSession, c
         fileInputRef.current?.click();
     };
 
+    const deleteSession = async (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        if (confirm('Are you sure you want to delete this chat?')) {
+            await fetch(`/api/history/${id}`, { method: 'DELETE' });
+            fetchSessions();
+            if (currentSessionId === id) {
+                onReset();
+            }
+        }
+    };
+
+    const clearHistory = async () => {
+        if (confirm('Are you sure you want to clear ALL chat history? This cannot be undone.')) {
+            await fetch('/api/history/clear', { method: 'DELETE' });
+            fetchSessions();
+            onReset();
+        }
+    };
+
     return (
         <div className="w-80 bg-black/40 backdrop-blur-xl border-r border-white/10 flex flex-col h-screen">
             <div className="p-6 border-b border-white/10 flex items-center justify-between">
@@ -169,25 +188,47 @@ export function Sidebar({ files, onUpload, onDelete, onReset, onSelectSession, c
 
                     {/* History Section */}
                     <div>
-                        <h3 className="text-xs font-semibold text-gray-400 mb-4 uppercase tracking-wider">
-                            History
-                        </h3>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                                History
+                            </h3>
+                            {sessions.length > 0 && (
+                                <Button
+                                    onClick={clearHistory}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-[10px] text-gray-500 hover:text-red-400 hover:bg-white/5"
+                                >
+                                    Clear All
+                                </Button>
+                            )}
+                        </div>
                         <div className="space-y-1">
                             {sessions.map((session) => (
                                 <div
                                     key={session.id}
                                     onClick={() => onSelectSession(session.id)}
-                                    className={`flex items-center p-2 rounded-md cursor-pointer transition-colors ${currentSessionId === session.id
+                                    className={`group flex items-center justify-between p-2 rounded-md cursor-pointer transition-colors ${currentSessionId === session.id
                                         ? 'bg-rose-500/10 border border-rose-500/20'
                                         : 'hover:bg-white/5 border border-transparent'
                                         }`}
                                 >
-                                    <MessageSquare className={`mr-3 h-4 w-4 flex-shrink-0 ${currentSessionId === session.id ? 'text-rose-400' : 'text-gray-400'
-                                        }`} />
-                                    <span className={`text-sm truncate ${currentSessionId === session.id ? 'text-rose-100' : 'text-gray-300'
-                                        }`} title={session.title}>
-                                        {session.title}
-                                    </span>
+                                    <div className="flex items-center overflow-hidden">
+                                        <MessageSquare className={`mr-3 h-4 w-4 flex-shrink-0 ${currentSessionId === session.id ? 'text-rose-400' : 'text-gray-400'
+                                            }`} />
+                                        <span className={`text-sm truncate ${currentSessionId === session.id ? 'text-rose-100' : 'text-gray-300'
+                                            }`} title={session.title}>
+                                            {session.title}
+                                        </span>
+                                    </div>
+                                    <Button
+                                        onClick={(e) => deleteSession(e, session.id)}
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-opacity"
+                                    >
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
                                 </div>
                             ))}
                         </div>

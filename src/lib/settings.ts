@@ -6,6 +6,13 @@ export interface Settings {
     ollamaHost: string;
     embeddingModel: string;
     chatModel: string;
+    summarizationModel: string;
+    summaryTemperature: number;
+    maxSummaryLength: number;
+    retrievalCollectionCount: number;
+    retrievalDocumentCount: number;
+    retrievalChunkCount: number;
+    systemPrompt: string;
 }
 
 const SETTINGS_FILE = path.join(CONFIG.DATA_DIR, 'settings.json');
@@ -14,6 +21,13 @@ const DEFAULT_SETTINGS: Settings = {
     ollamaHost: CONFIG.OLLAMA_HOST,
     embeddingModel: CONFIG.OLLAMA_EMBEDDING_MODEL,
     chatModel: CONFIG.OLLAMA_CHAT_MODEL,
+    summarizationModel: CONFIG.OLLAMA_CHAT_MODEL,
+    summaryTemperature: 0.3,
+    maxSummaryLength: 100,
+    retrievalCollectionCount: 3,
+    retrievalDocumentCount: 5,
+    retrievalChunkCount: 5,
+    systemPrompt: '',
 };
 
 export function getSettings(): Settings {

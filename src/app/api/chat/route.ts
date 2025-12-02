@@ -1,6 +1,6 @@
 import { createSession, getSession, saveSession, ChatSession } from '@/lib/chat-history';
 import { systemPrompt } from '@/lib/prompts';
-import { similaritySearch } from '@/lib/vector-store';
+import { hierarchicalSearch } from '@/lib/vector-store';
 import { getSettings } from '@/lib/settings';
 import { convertToCoreMessages, streamText, generateText, StreamData } from 'ai';
 import { createOllama } from 'ollama-ai-provider';
@@ -49,11 +49,33 @@ export async function POST(req: Request) {
     saveSession(session);
 
     // Context retrieval
-    const relevantDocs = await similaritySearch(lastMessage.content);
+    const searchResult = await hierarchicalSearch(lastMessage.content);
     let context = "";
-    relevantDocs.forEach((doc, index) => {
-        context += `Source ${index + 1}:\n${doc.text}\n\n`;
-    });
+
+    if (searchResult.bestDocument) {
+        context += `Best Matching Document:\n${searchResult.bestDocument.original_text}\n\n`;
+    }
+
+    if (searchResult.topChunks.length > 0) {
+        context += `Top Matching Chunks:\n`;
+        searchResult.topChunks.forEach((chunk, index) => {
+            context += `Chunk ${index + 1}:\n${chunk.original_text}\n\n`;
+        });
+    }
+
+    const sources = searchResult.topChunks.map(chunk => ({
+        id: chunk.id,
+        text: chunk.original_text,
+        similarity: chunk.score
+    }));
+
+    if (searchResult.bestDocument) {
+        sources.unshift({
+            id: searchResult.bestDocument.id,
+            text: searchResult.bestDocument.original_text,
+            similarity: searchResult.bestDocument.score
+        });
+    }
 
     // Handle @filename referencing
     const fileRegex = /@([\w.-]+)/g;
@@ -87,12 +109,14 @@ export async function POST(req: Request) {
     }
 
     const data = new StreamData();
-    data.append({ sources: relevantDocs });
+    data.append({ sources: sources });
+
+    const prompt = settings.systemPrompt ? settings.systemPrompt.replace('${sources}', context) : systemPrompt(context);
 
     try {
         const result = await streamText({
             model: ollama(settings.chatModel),
-            system: systemPrompt(context),
+            system: prompt,
             messages: convertToCoreMessages(messages),
             onFinish: async (completion) => {
                 // Save assistant response
@@ -101,7 +125,7 @@ export async function POST(req: Request) {
                         id: Date.now().toString(), // Simple ID generation
                         role: 'assistant',
                         content: completion.text,
-                        annotations: [{ type: 'sources', sources: relevantDocs }]
+                        annotations: [{ type: 'sources', sources: sources }]
                     });
                     saveSession(session);
                 }

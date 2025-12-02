@@ -1,10 +1,11 @@
-import { getSession } from '@/lib/chat-history';
+import { deleteSession } from '@/lib/chat-history';
 import { NextResponse } from 'next/server';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
-    const session = getSession(params.id);
-    if (!session) {
-        return new NextResponse('Session not found', { status: 404 });
-    }
-    return NextResponse.json(session);
+export async function DELETE(
+    request: Request,
+    { params }: { params: { id: string } }
+) {
+    const id = params.id;
+    deleteSession(id);
+    return NextResponse.json({ success: true });
 }

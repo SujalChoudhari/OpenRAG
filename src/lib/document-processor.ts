@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { storeEmbedding } from './vector-store';
+import { storeEmbedding, storeCollection, storeDocument, storeChunk } from './vector-store';
+import { generateSummary } from './ollama';
 import { CONFIG } from './config';
 
 const VALID_FILE_EXTS = ['.md', '.txt', '.html', '.csv'];
@@ -45,25 +46,141 @@ export class DocumentProcessor {
     async processFile(filePath: string, onProgress?: (msg: string) => void) {
         try {
             const fileName = path.basename(filePath);
+            const collectionId = fileName; // Use filename as collection ID for now
             if (onProgress) onProgress(`Reading ${fileName}...`);
 
             const content = await fs.readFile(filePath, 'utf-8');
             const processedContent = this.preprocessText(content);
 
-            if (onProgress) onProgress(`Chunking ${fileName}...`);
-            const docs = this.splitIntoChunks(fileName, processedContent);
+            // Level 2: Documents (Pages)
+            // Target ~1000 tokens per page. Assuming ~4 chars per token -> 4000 chars.
+            if (onProgress) onProgress(`Splitting ${fileName} into pages...`);
+            const pages = this.splitIntoPages(processedContent, 4000);
+            const docSummaries: string[] = [];
 
-            let i = 0;
-            for (const doc of docs) {
-                i++;
-                if (onProgress) onProgress(`Embedding ${fileName} chunk ${i}/${docs.length}...`);
-                await storeEmbedding(doc.content, doc.name);
+            for (let i = 0; i < pages.length; i++) {
+                const pageContent = pages[i];
+                const docId = `${collectionId}_page_${i + 1}`;
+
+                // Level 3: Chunks
+                // Target ~500 tokens per chunk. Assuming ~4 chars per token -> 2000 chars.
+                // We temporarily override maxWordsPerDoc for chunking logic if needed, 
+                // but splitIntoChunks uses this.maxWordsPerDoc. 
+                // Let's create a local chunker or just use splitIntoChunks with the instance's config 
+                // but we need to ensure instance is configured correctly or we pass a size.
+                // For now, let's assume splitIntoChunks respects this.maxWordsPerDoc which is 1500 words (~6000 chars).
+                // We want smaller chunks. Let's manually chunk here or adjust splitIntoChunks.
+                // I'll add a chunkSize param to splitIntoChunks or just use a helper.
+
+                if (onProgress) onProgress(`Processing page ${i + 1}/${pages.length}...`);
+
+                // Using a smaller chunk size for the hierarchy
+                const chunkSize = 2000; // ~500 tokens
+                const chunks = this.splitTextIntoChunks(docId, pageContent, chunkSize);
+                const chunkSummaries: string[] = [];
+
+                for (let j = 0; j < chunks.length; j++) {
+                    const chunk = chunks[j];
+                    const chunkId = chunk.name;
+
+                    // Generate Chunk Summary
+                    const chunkSummary = await generateSummary(`Summarize this text in 2-3 sentences: ${chunk.content}`);
+                    chunkSummaries.push(chunkSummary);
+
+                    // Store Chunk
+                    await storeChunk(chunkId, docId, chunkSummary, chunk.content);
+                }
+
+                // Generate Document Summary
+                const docSummaryPrompt = `Summarize these key points into a cohesive 2-3 sentence overview: ${chunkSummaries.join('\n')}`;
+                const docSummary = await generateSummary(docSummaryPrompt);
+                docSummaries.push(docSummary);
+
+                // Store Document
+                await storeDocument(docId, collectionId, docSummary, pageContent);
             }
+
+            // Generate Collection Summary
+            if (onProgress) onProgress(`Generating summary for ${fileName}...`);
+            const collectionSummaryPrompt = `Summarize this document's main themes and topics in 2-3 sentences: ${docSummaries.join('\n')}`;
+            const collectionSummary = await generateSummary(collectionSummaryPrompt);
+
+            // Store Collection
+            await storeCollection(collectionId, fileName, collectionSummary);
+
             if (onProgress) onProgress(`Finished processing ${fileName}`);
         } catch (err) {
             console.warn(`Skipping file ${filePath} (not text or unreadable):`, err);
             if (onProgress) onProgress(`Error processing ${path.basename(filePath)}: ${err}`);
         }
+    }
+
+    splitIntoPages(text: string, charsPerPage = 4000): string[] {
+        const pages: string[] = [];
+        let start = 0;
+
+        while (start < text.length) {
+            let end = start + charsPerPage;
+            if (end >= text.length) {
+                end = text.length;
+            } else {
+                // Find natural break
+                const lookback = Math.min(500, charsPerPage * 0.2);
+                const window = text.substring(end - lookback, end);
+                const lastPeriod = window.lastIndexOf('. ');
+                const lastNewline = window.lastIndexOf('\n');
+
+                if (lastNewline !== -1) {
+                    end = end - lookback + lastNewline + 1;
+                } else if (lastPeriod !== -1) {
+                    end = end - lookback + lastPeriod + 2;
+                }
+            }
+
+            pages.push(text.substring(start, end).trim());
+            start = end;
+        }
+        return pages;
+    }
+
+    splitTextIntoChunks(baseId: string, content: string, chunkSize: number): ExtractDocument[] {
+        const docs: ExtractDocument[] = [];
+        let start = 0;
+        let chunkIndex = 1;
+        const overlap = 100;
+
+        while (start < content.length) {
+            let end = start + chunkSize;
+
+            if (end >= content.length) {
+                end = content.length;
+            } else {
+                const lookback = Math.min(100, chunkSize * 0.2);
+                const textWindow = content.substring(end - lookback, end);
+                const breakPoints = ['\n\n', '\n', '. ', ' '];
+
+                for (const bp of breakPoints) {
+                    const lastIndex = textWindow.lastIndexOf(bp);
+                    if (lastIndex !== -1) {
+                        end = end - lookback + lastIndex + bp.length;
+                        break;
+                    }
+                }
+            }
+
+            const chunkText = content.substring(start, end).trim();
+            if (chunkText.length > 0) {
+                docs.push({
+                    name: `${baseId}_chunk_${chunkIndex++}`,
+                    content: chunkText
+                });
+            }
+
+            start = end - overlap;
+            if (start <= 0 && chunkIndex > 1) start = end; // Avoid infinite loop if overlap issues
+            if (end === content.length) break;
+        }
+        return docs;
     }
 
     preprocessText(text: string) {

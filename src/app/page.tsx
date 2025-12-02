@@ -16,8 +16,12 @@ export default function ChatInterface() {
   const { messages, input, handleInputChange, handleSubmit, setMessages, data } = useChat({
     keepLastMessageOnError: true,
     body: { sessionId },
-    onResponse: () => {
+    onResponse: (response) => {
       setIsTyping(false);
+      const newSessionId = response.headers.get('X-Session-Id');
+      if (newSessionId && newSessionId !== sessionId) {
+        setSessionId(newSessionId);
+      }
     }
   });
 
