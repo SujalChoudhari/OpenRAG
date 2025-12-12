@@ -100,4 +100,21 @@ Contributions are welcome! Please fork the repository, make your changes, and su
 
 ## License
 
-This project is licensed under the MIT license. See the LICENSE file for more information.# Innovative-Development-Project
+This project is licensed under the MIT license. See the LICENSE file for more information.
+
+## Desktop Application
+
+You can also run OpenRAG as a desktop application using Electron.
+
+### Development
+To run the desktop app in development mode:
+```bash
+npm run electron-dev
+```
+
+### Packaging
+To package the application for your OS (creates an installer):
+```bash
+npm run electron-build
+```
+The installer will be in the `dist` directory.

@@ -33,6 +33,7 @@ interface SettingsData {
     retrievalDocumentCount: number;
     retrievalChunkCount: number;
     systemPrompt: string;
+    vaultPath?: string;
 }
 
 interface Model {
@@ -134,14 +135,52 @@ export function SettingsDialog() {
                             <SelectTrigger className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:ring-rose-500/20">
                                 <SelectValue placeholder="Select model" />
                             </SelectTrigger>
-                            <SelectContent className="bg-gray-900 border-white/10 text-gray-100">
-                                {models.map((model) => (
+                            <SelectContent className="bg-gray-900 border-white/10 text-gray-100 z-[100] max-h-[300px]">
+                                {models.length === 0 ? (
+                                    <div className="p-2 text-sm text-gray-500">No models found</div>
+                                ) : models.map((model) => (
                                     <SelectItem key={model.name} value={model.name}>
                                         {model.name}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
+
+                    </div>
+
+                    <div className="border-t border-white/10 my-2"></div>
+                    <div className="text-sm font-semibold text-rose-400 mb-2">Second Brain (Vault)</div>
+
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="vault" className="text-right text-gray-300">
+                            Vault Path
+                        </Label>
+                        <Input
+                            id="vault"
+                            value={settings.vaultPath || ''}
+                            onChange={(e) => setSettings({ ...settings, vaultPath: e.target.value })}
+                            className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:border-rose-500/50 focus:ring-rose-500/20"
+                            placeholder="abs/path/to/vault"
+                        />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4 mt-2">
+                        <div className="col-start-2 col-span-3">
+                            <Button
+                                onClick={async () => {
+                                    if (confirm('This will scan the vault and re-index all files. Continue?')) {
+                                        try {
+                                            await fetch('/api/ingest', { method: 'POST' });
+                                            alert('Ingestion started in background.');
+                                        } catch (e) { alert('Failed to start ingestion'); }
+                                    }
+                                }}
+                                variant="secondary"
+                                size="sm"
+                                className="w-full bg-white/10 hover:bg-white/20 text-rose-200"
+                            >
+                                Re-index Vault
+                            </Button>
+                        </div>
                     </div>
                     <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="chat" className="text-right text-gray-300">
@@ -154,8 +193,10 @@ export function SettingsDialog() {
                             <SelectTrigger className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:ring-rose-500/20">
                                 <SelectValue placeholder="Select model" />
                             </SelectTrigger>
-                            <SelectContent className="bg-gray-900 border-white/10 text-gray-100">
-                                {models.map((model) => (
+                            <SelectContent className="bg-gray-900 border-white/10 text-gray-100 z-[100] max-h-[300px]">
+                                {models.length === 0 ? (
+                                    <div className="p-2 text-sm text-gray-500">No models found</div>
+                                ) : models.map((model) => (
                                     <SelectItem key={model.name} value={model.name}>
                                         {model.name}
                                     </SelectItem>
@@ -178,8 +219,10 @@ export function SettingsDialog() {
                             <SelectTrigger className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:ring-rose-500/20">
                                 <SelectValue placeholder="Select model" />
                             </SelectTrigger>
-                            <SelectContent className="bg-gray-900 border-white/10 text-gray-100">
-                                {models.map((model) => (
+                            <SelectContent className="bg-gray-900 border-white/10 text-gray-100 z-[100] max-h-[300px]">
+                                {models.length === 0 ? (
+                                    <div className="p-2 text-sm text-gray-500">No models found</div>
+                                ) : models.map((model) => (
                                     <SelectItem key={model.name} value={model.name}>
                                         {model.name}
                                     </SelectItem>
@@ -276,7 +319,7 @@ export function SettingsDialog() {
                         {loading ? 'Saving...' : 'Save changes'}
                     </Button>
                 </DialogFooter>
-            </DialogContent>
-        </Dialog>
+            </DialogContent >
+        </Dialog >
     );
 }

@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { File, Trash2, Upload, PlusCircle, MessageSquare } from 'lucide-react';
+import { getVaultStats } from "@/app/actions";
 import * as React from 'react';
 import { useRef } from 'react';
 import { SettingsDialog } from "./settings-dialog";
@@ -26,12 +27,15 @@ interface ChatSession {
 export function Sidebar({ files, onUpload, onDelete, onReset, onSelectSession, currentSessionId, uploadLogs }: SidebarProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [sessions, setSessions] = React.useState<ChatSession[]>([]);
+    const [vaultCount, setVaultCount] = React.useState(0);
 
     const fetchSessions = () => {
         fetch('/api/history')
             .then(res => res.json())
             .then(data => setSessions(data.sessions || []))
             .catch(err => console.error('Failed to load history:', err));
+
+        getVaultStats().then(stats => setVaultCount(stats.count));
     };
 
     React.useEffect(() => {
@@ -65,13 +69,13 @@ export function Sidebar({ files, onUpload, onDelete, onReset, onSelectSession, c
     };
 
     return (
-        <div className="w-80 bg-black/40 backdrop-blur-xl border-r border-white/10 flex flex-col h-screen">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between">
-                <h2 className="text-xl font-bold bg-gradient-to-r from-rose-500 to-amber-500 bg-clip-text text-transparent">
-                    OpenRAG
+        <div className="w-80 glass-panel bg-black/60 flex flex-col h-screen border-r border-white/5 z-50">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/20">
+                <h2 className="text-xl font-bold bg-gradient-to-r from-rose-500 to-amber-500 bg-clip-text text-transparent flex items-center gap-2">
+                    <span className="text-2xl">✦</span> OpenRAG
                 </h2>
                 <div className="flex gap-2">
-                    <Button onClick={onReset} variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-white/5" title="New Chat">
+                    <Button onClick={onReset} variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-white/5 rounded-full" title="New Chat">
                         <PlusCircle className="h-5 w-5" />
                     </Button>
                     <SettingsDialog />
@@ -104,6 +108,18 @@ export function Sidebar({ files, onUpload, onDelete, onReset, onSelectSession, c
                                 Add Files
                             </Button>
                         </div>
+
+                        {vaultCount > 0 && (
+                            <div className="mb-4 p-3 bg-white/5 border border-white/5 rounded-lg flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-rose-500/20 flex items-center justify-center">
+                                    <span className="text-rose-400 text-xs font-bold">SB</span>
+                                </div>
+                                <div>
+                                    <div className="text-xs font-semibold text-gray-200">Second Brain Active</div>
+                                    <div className="text-[10px] text-gray-400">{vaultCount} items indexed</div>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="space-y-2">
                             {files.length === 0 ? (

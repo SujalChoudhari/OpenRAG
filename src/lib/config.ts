@@ -2,7 +2,7 @@ import path from 'path';
 
 export const CONFIG = {
     OLLAMA_HOST: process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434',
-    OLLAMA_EMBEDDING_MODEL: process.env.OLLAMA_EMBEDDING_MODEL ?? 'nomic-embed-text',
+    OLLAMA_EMBEDDING_MODEL: process.env.OLLAMA_EMBEDDING_MODEL ?? 'mahonzhan/all-MiniLM-L6-v2:latest',
     OLLAMA_CHAT_MODEL: process.env.OLLAMA_CHAT_MODEL ?? 'granite4:350m',
 
     DATA_DIR: path.join(process.cwd(), '_data'),
@@ -11,6 +11,9 @@ export const CONFIG = {
     },
     get DB_PATH() {
         return path.join(this.DATA_DIR, 'embeddings.sqlite');
+    },
+    get LANCEDB_URI() {
+        return path.join(this.DATA_DIR, 'lancedb');
     },
 
     // Document processing

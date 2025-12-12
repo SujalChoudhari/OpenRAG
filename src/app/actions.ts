@@ -39,3 +39,14 @@ export async function addContent(files: UploadedFile[]) {
     // Run in background without awaiting
     void docProcessor.loadDocuments().catch(err => console.error("Background processing error:", err));
 }
+
+export async function getVaultStats() {
+    try {
+        const { getTable } = await import('../lib/lancedb');
+        const table = await getTable('vectors');
+        const count = await table.countRows();
+        return { count };
+    } catch (error) {
+        return { count: 0 };
+    }
+}

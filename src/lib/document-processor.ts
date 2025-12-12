@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { storeEmbedding, storeCollection, storeDocument, storeChunk } from './vector-store';
+import { storeCollection, storeDocument, storeChunk } from './vector-store';
 import { generateSummary } from './ollama';
 import { CONFIG } from './config';
 
@@ -88,7 +88,7 @@ export class DocumentProcessor {
                     chunkSummaries.push(chunkSummary);
 
                     // Store Chunk
-                    await storeChunk(chunkId, docId, chunkSummary, chunk.content);
+                    await storeChunk(chunkId, docId, chunkSummary, chunk.content, filePath);
                 }
 
                 // Generate Document Summary
@@ -97,7 +97,7 @@ export class DocumentProcessor {
                 docSummaries.push(docSummary);
 
                 // Store Document
-                await storeDocument(docId, collectionId, docSummary, pageContent);
+                await storeDocument(docId, collectionId, docSummary, pageContent, filePath);
             }
 
             // Generate Collection Summary

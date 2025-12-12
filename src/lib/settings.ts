@@ -13,6 +13,7 @@ export interface Settings {
     retrievalDocumentCount: number;
     retrievalChunkCount: number;
     systemPrompt: string;
+    vaultPath: string;
 }
 
 const SETTINGS_FILE = path.join(CONFIG.DATA_DIR, 'settings.json');
@@ -28,6 +29,7 @@ const DEFAULT_SETTINGS: Settings = {
     retrievalDocumentCount: 5,
     retrievalChunkCount: 5,
     systemPrompt: '',
+    vaultPath: 'F:\\Workspace\\ObsidianVault\\Sujal',
 };
 
 export function getSettings(): Settings {

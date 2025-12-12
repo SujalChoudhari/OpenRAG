@@ -368,10 +368,10 @@ export function ChatArea({
                 )}
             </div>
 
-            <div className="p-6 bg-black/80 backdrop-blur-md border-t border-white/10 z-20 relative">
+            <div className="p-6 bg-black/40 backdrop-blur-xl border-t border-white/5 z-20 relative">
                 {/* Suggestions Dropdown */}
                 {showSuggestions && (
-                    <div className="absolute bottom-full mb-2 left-6 w-64 bg-gray-900 border border-white/10 rounded-lg shadow-xl overflow-hidden z-50">
+                    <div className="absolute bottom-full mb-2 left-6 w-64 glass bg-black/90 rounded-lg shadow-2xl overflow-hidden z-50">
                         <div className="p-2 text-xs text-gray-500 border-b border-white/5">Suggested Files</div>
                         <div className="max-h-48 overflow-y-auto">
                             {filteredFiles.map((file, idx) => (
@@ -388,21 +388,21 @@ export function ChatArea({
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative">
+                <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
                     <Input
                         ref={inputRef}
                         name="chat-input"
                         value={input}
                         onChange={handleInputWrapper}
-                        placeholder="Ask anything about your documents... (Type @ to reference a file)"
-                        className="w-full pl-6 pr-14 py-6 bg-gray-900/50 border-white/10 focus:border-rose-500/50 focus:ring-rose-500/20 rounded-full text-gray-100 placeholder:text-gray-500 shadow-inner"
+                        placeholder="Ask anything about your life... (Type @ to reference)"
+                        className="w-full pl-6 pr-14 py-7 bg-white/5 border-white/10 focus:border-rose-500/50 focus:ring-rose-500/20 rounded-2xl text-gray-100 placeholder:text-gray-500 shadow-xl transition-all hover:bg-white/10"
                         autoComplete="off"
                     />
                     <Button
                         type="submit"
                         size="icon"
                         disabled={!input.trim() || isTyping}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full w-10 h-10 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl w-10 h-10 bg-gradient-to-tr from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
                         <Send className="h-4 w-4" />
                     </Button>
