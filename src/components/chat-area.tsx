@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Message } from 'ai';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Send, Bot, User, Brain, ChevronDown, ChevronRight, Sparkles, BookOpen } from 'lucide-react';
+import { Send, Bot, User, Brain, ChevronDown, ChevronRight, Sparkles, BookOpen, Database, AlertCircle } from 'lucide-react';
 import Markdown from "react-markdown";
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -16,6 +16,13 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+interface SelectedPersona {
+    id: string;
+    name: string;
+    avatar?: string;
+    role: string;
+}
+
 interface ChatAreaProps {
     messages: Message[];
     input: string;
@@ -23,34 +30,122 @@ interface ChatAreaProps {
     handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
     isTyping: boolean;
     typingMessage: string;
-    data?: any[];
+    data?: unknown[];
     files?: string[];
+    personaSelector?: React.ReactNode;
+    selectedPersona?: SelectedPersona | null;
 }
 
-// Helper to parse the XML structure
-function parseAIResponse(content: string) {
-    const thoughtMatch = content.match(/<thought_process>([\s\S]*?)<\/thought_process>/);
-    const answerMatch = content.match(/<answer>([\s\S]*?)<\/answer>/);
-    const questionsMatch = content.match(/<suggested_questions>([\s\S]*?)<\/suggested_questions>/);
+interface ParsedResponse {
+    thought: string | null;
+    answer: string;
+    questions: string[];
+}
 
-    const thought = thoughtMatch ? thoughtMatch[1].trim() : null;
-    let answer = answerMatch ? answerMatch[1].trim() : content;
+/**
+ * Parse AI response content, handling various formats:
+ * - Standard responses
+ * - XML-structured responses with <thought_process>, <answer>, <suggested_questions>
+ * - Thinking model responses with <thinking> or <think> tags
+ */
+function parseAIResponse(content: string): ParsedResponse {
+    // Try multiple thinking tag formats (thinking models use different tags)
+    const thinkingPatterns = [
+        /<thought_process>([\s\S]*?)<\/thought_process>/,
+        /<thinking>([\s\S]*?)<\/thinking>/,
+        /<think>([\s\S]*?)<\/think>/,
+    ];
 
-    if (!answerMatch && thoughtMatch) {
-        answer = content.replace(/<thought_process>[\s\S]*?<\/thought_process>/, '').trim();
-    }
+    let thought: string | null = null;
+    let processedContent = content;
 
-    answer = answer.replace(/<suggested_questions>[\s\S]*?<\/suggested_questions>/, '').trim();
-
-    const questions: string[] = [];
-    if (questionsMatch) {
-        const qMatches = Array.from(questionsMatch[1].matchAll(/<q>(.*?)<\/q>/g));
-        for (const match of qMatches) {
-            questions.push(match[1]);
+    // Find and extract thinking content
+    for (const pattern of thinkingPatterns) {
+        const match = content.match(pattern);
+        if (match) {
+            thought = match[1].trim();
+            processedContent = content.replace(pattern, '').trim();
+            break;
         }
     }
 
+    // If no complete thinking block, check for open thinking block (streaming)
+    if (!thought) {
+        const openTags = ['<thought_process>', '<thinking>', '<think>'];
+        for (const tag of openTags) {
+            if (content.includes(tag)) {
+                // Check if it's closed
+                const closeTag = tag.replace('<', '</');
+                if (!content.includes(closeTag)) {
+                    // It's an open, streaming thought
+                    const parts = content.split(tag);
+                    if (parts.length > 1) {
+                        // Everything after the tag is the thought so far
+                        thought = parts[1].trim();
+                        // Ideally we hide the thought from the main answer while it's streaming
+                        // But for now, let's just make sure we capture it.
+                        // Actually, if we're in "thought mode", the whole content IS the thought.
+                        // But we want to separate it.
+
+                        // If we're streaming and only have the thought, answer is empty
+                        processedContent = parts[0].trim();
+                    }
+                }
+            }
+        }
+    }
+
+    // Try to extract structured answer
+    const answerMatch = processedContent.match(/<answer>([\s\S]*?)<\/answer>/);
+    let answer = answerMatch ? answerMatch[1].trim() : processedContent;
+
+    // Clean up any remaining thought tags from answer
+    answer = answer
+        .replace(/<thought_process>[\s\S]*?<\/thought_process>/g, '')
+        .replace(/<thinking>[\s\S]*?<\/thinking>/g, '')
+        .replace(/<think>[\s\S]*?<\/think>/g, '')
+        .trim();
+
+    // Extract suggested questions
+    const questionsMatch = answer.match(/<suggested_questions>([\s\S]*?)<\/suggested_questions>/);
+    const questions: string[] = [];
+
+    if (questionsMatch) {
+        const qMatches = Array.from(questionsMatch[1].matchAll(/<q>(.*?)<\/q>/g));
+        for (const match of qMatches) {
+            questions.push(match[1].trim());
+        }
+        // Remove questions from answer
+        answer = answer.replace(/<suggested_questions>[\s\S]*?<\/suggested_questions>/, '').trim();
+    }
+
+    // Clean up any leading/trailing whitespace and empty lines
+    answer = answer.replace(/^\s*\n+/, '').replace(/\n+\s*$/, '');
+
     return { thought, answer, questions };
+}
+
+// Debounce hook
+function useDebounce<T>(value: T, delay: number): T {
+    const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedValue(value);
+        }, delay);
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [value, delay]);
+
+    return debouncedValue;
+}
+
+interface SourceData {
+    id?: string;
+    text: string;
+    similarity?: number;
 }
 
 export function ChatArea({
@@ -61,7 +156,9 @@ export function ChatArea({
     isTyping,
     typingMessage,
     data,
-    files = []
+    files = [],
+    personaSelector,
+    selectedPersona
 }: ChatAreaProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
@@ -69,19 +166,35 @@ export function ChatArea({
 
     // Autocomplete state
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [filteredFiles, setFilteredFiles] = useState<string[]>([]);
+    const [autocompleteQuery, setAutocompleteQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Extract sources from data stream
-    const sources = data?.find(d => d && (d as any).sources)?.sources || [];
+    // Debounce autocomplete query
+    const debouncedQuery = useDebounce(autocompleteQuery, 150);
 
-    const toggleThought = (messageId: string) => {
+    // Memoize filtered files
+    const filteredFiles = useMemo(() => {
+        if (!debouncedQuery) return files;
+        return files.filter(f => f.toLowerCase().includes(debouncedQuery.toLowerCase()));
+    }, [files, debouncedQuery]);
+
+    // Extract sources and ragStatus from data stream - memoized
+    const { sources, ragStatus } = useMemo(() => {
+        const sourceData = data?.find(d => d && (d as { sources?: SourceData[] }).sources) as { sources: SourceData[], ragStatus?: { searched: boolean, found: number, error: string | null } } | undefined;
+        return {
+            sources: sourceData?.sources || [],
+            ragStatus: sourceData?.ragStatus || null
+        };
+    }, [data]);
+
+    const toggleThought = useCallback((messageId: string) => {
         setExpandedThoughts(prev => ({
             ...prev,
             [messageId]: !prev[messageId]
         }));
-    };
+    }, []);
 
+    // Auto-scroll to bottom
     useEffect(() => {
         if (scrollRef.current) {
             const scrollElement = scrollRef.current;
@@ -92,15 +205,16 @@ export function ChatArea({
         }
     }, [messages, isTyping]);
 
+    // Scroll to bottom on new user message
     useEffect(() => {
         if (messages.length > 0 && messages[messages.length - 1].role === 'user' && scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [messages.length]);
+    }, [messages.length, messages]);
 
-    const handleInputWrapper = (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => {
+    const handleInputWrapper = useCallback((e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => {
         const value = e.target.value;
-        const cursorPosition = e.target.selectionStart || 0;
+        const cursorPosition = (e.target as HTMLInputElement).selectionStart || 0;
 
         // Always update the input state first
         handleInputChange(e);
@@ -111,19 +225,17 @@ export function ChatArea({
             const query = value.slice(lastAt + 1, cursorPosition);
             // Only show if no space after @ (unless searching)
             if (!query.includes(' ')) {
-                const matches = files.filter(f => f.toLowerCase().includes(query.toLowerCase()));
-                if (matches.length > 0) {
-                    setFilteredFiles(matches);
-                    setShowSuggestions(true);
-                    return;
-                }
+                setAutocompleteQuery(query);
+                setShowSuggestions(true);
+                return;
             }
         }
 
         setShowSuggestions(false);
-    };
+        setAutocompleteQuery('');
+    }, [handleInputChange]);
 
-    const insertFile = (fileName: string) => {
+    const insertFile = useCallback((fileName: string) => {
         if (!inputRef.current) return;
 
         const value = input;
@@ -132,9 +244,9 @@ export function ChatArea({
 
         if (lastAt !== -1) {
             const newValue = value.slice(0, lastAt) + `@${fileName} ` + value.slice(cursorPosition);
-            const newCursorPos = lastAt + fileName.length + 2; // +2 for @ and space
+            const newCursorPos = lastAt + fileName.length + 2;
 
-            // Create synthetic event
+            // Use native setter for controlled input
             const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
             if (nativeInputSetter) {
                 nativeInputSetter.call(inputRef.current, newValue);
@@ -142,14 +254,17 @@ export function ChatArea({
             }
 
             setShowSuggestions(false);
+            setAutocompleteQuery('');
             inputRef.current.focus();
-            inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+            requestAnimationFrame(() => {
+                inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+            });
         }
-    };
+    }, [input]);
 
-    const handleQuestionClick = (question: string) => {
-        const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+    const handleQuestionClick = useCallback((question: string) => {
         const inputElement = document.querySelector('input[name="chat-input"]') as HTMLInputElement;
+        const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
 
         if (inputElement && nativeInputSetter) {
             nativeInputSetter.call(inputElement, question);
@@ -159,17 +274,17 @@ export function ChatArea({
                 form?.requestSubmit();
             }, 100);
         }
-    };
+    }, []);
 
-    const renderAnswerWithCitations = (text: string, sources: any[]) => {
-        // Split text by citation pattern [Source: X]
+    // Memoized citation renderer
+    const renderAnswerWithCitations = useCallback((text: string, messageSources: SourceData[]) => {
         const parts = text.split(/(\[Source: \d+\])/g);
 
         return parts.map((part, index) => {
             const match = part.match(/\[Source: (\d+)\]/);
             if (match) {
                 const sourceIndex = parseInt(match[1]) - 1;
-                const source = sources?.[sourceIndex];
+                const source = messageSources?.[sourceIndex];
 
                 if (source) {
                     return (
@@ -186,163 +301,201 @@ export function ChatArea({
                 }
                 return <span key={index} className="text-gray-500 text-xs">[{sourceIndex + 1}]</span>;
             }
-            return <Markdown key={index} className="inline prose prose-invert prose-sm max-w-none" components={{
-                p: ({ node, ...props }) => <span {...props} />, // Render paragraphs as spans to stay inline
-                pre: ({ node: _node, ...props }) => <div className="overflow-auto w-full my-2 bg-black/30 p-2 rounded block" {...props as any} />,
-                code: ({ node: _node, ...props }) => <code className="bg-black/30 px-1 py-0.5 rounded text-sm" {...props as any} />
-            }}>{part}</Markdown>;
+            return (
+                <Markdown
+                    key={index}
+                    className="inline prose prose-invert prose-sm max-w-none"
+                    components={{
+                        p: ({ children }) => <span>{children}</span>,
+                        pre: ({ children }) => <div className="overflow-auto w-full my-2 bg-black/30 p-2 rounded block">{children}</div>,
+                        code: ({ children, className }) => <code className={`bg-black/30 px-1 py-0.5 rounded text-sm ${className || ''}`}>{children}</code>
+                    }}
+                >
+                    {part}
+                </Markdown>
+            );
         });
-    };
+    }, []);
+
+    // Memoized message rendering
+    const renderedMessages = useMemo(() => {
+        return messages.map((message, index) => {
+            const isUser = message.role === 'user';
+            const { thought, answer, questions } = !isUser ? parseAIResponse(message.content) : { thought: null, answer: message.content, questions: [] };
+
+            // Check for sources in annotations (persisted) or data (streaming)
+            const annotation = message.annotations?.find((a: unknown) => (a as { type?: string }).type === 'sources') as { sources?: SourceData[] } | undefined;
+            const messageSources = annotation?.sources || (index === messages.length - 1 ? sources : []);
+
+            return (
+                <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                >
+                    <div className={`flex items-start max-w-[85%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser ? 'bg-rose-600 ml-3' : 'bg-gray-800 mr-3'}`}>
+                            {isUser ? <User className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-rose-400" />}
+                        </div>
+
+                        <div className="flex flex-col space-y-2 w-full">
+                            {/* Sources Section (Collapsible) */}
+                            {!isUser && messageSources && messageSources.length > 0 && (
+                                <div className="glass-card rounded-xl overflow-hidden mb-2">
+                                    <button
+                                        onClick={() => toggleThought(`sources-${message.id}`)}
+                                        className="w-full flex items-center px-3 py-2.5 text-xs text-amber-500/80 hover:text-amber-500 hover:bg-white/[0.03] transition-colors"
+                                    >
+                                        <BookOpen className="w-3 h-3 mr-2" />
+                                        <span>Sources Used ({messageSources.length})</span>
+                                        {expandedThoughts[`sources-${message.id}`] ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
+                                    </button>
+                                    <AnimatePresence>
+                                        {expandedThoughts[`sources-${message.id}`] && (
+                                            <motion.div
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: 'auto', opacity: 1 }}
+                                                exit={{ height: 0, opacity: 0 }}
+                                                className="px-3 pb-3 space-y-2"
+                                            >
+                                                <div className="text-xs text-gray-500 font-mono border-t border-white/5 pt-2">
+                                                    {messageSources.map((source, idx) => (
+                                                        <div key={idx} className="mb-2 last:mb-0">
+                                                            <div className="font-semibold text-gray-400 mb-1">Source {idx + 1}</div>
+                                                            <div className="line-clamp-2">{source.text}</div>
+                                                            <button
+                                                                onClick={() => setSelectedSource({ title: `Source ${idx + 1}`, content: source.text })}
+                                                                className="text-rose-500 hover:underline mt-1"
+                                                            >
+                                                                View Full
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            )}
+
+                            {thought && (
+                                <div className="glass-card rounded-xl overflow-hidden">
+                                    <button
+                                        onClick={() => toggleThought(message.id)}
+                                        className="w-full flex items-center px-3 py-2.5 text-xs text-neutral-400 hover:text-neutral-300 hover:bg-white/[0.03] transition-colors"
+                                    >
+                                        <Brain className="w-3 h-3 mr-2" />
+                                        <span>Thinking Process</span>
+                                        {expandedThoughts[message.id] ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
+                                    </button>
+                                    <AnimatePresence>
+                                        {expandedThoughts[message.id] && (
+                                            <motion.div
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: 'auto', opacity: 1 }}
+                                                exit={{ height: 0, opacity: 0 }}
+                                                className="px-3 pb-3"
+                                            >
+                                                <div className="text-xs text-gray-500 font-mono border-t border-white/5 pt-2">
+                                                    {thought}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            )}
+
+                            <div
+                                className={`p-4 rounded-2xl shadow-lg backdrop-blur-sm border ${isUser
+                                    ? 'bg-gradient-to-br from-rose-600/15 to-amber-600/10 border-rose-500/20 text-neutral-100 rounded-tr-none'
+                                    : 'glass-card text-neutral-100 rounded-tl-none'
+                                    }`}
+                            >
+                                {isUser ? (
+                                    <Markdown
+                                        className="prose prose-invert prose-sm max-w-none"
+                                        components={{
+                                            pre: ({ children }) => <div className="overflow-auto w-full my-2 bg-black/30 p-2 rounded">{children}</div>,
+                                            code: ({ children, className }) => <code className={`bg-black/30 px-1 py-0.5 rounded text-sm ${className || ''}`}>{children}</code>
+                                        }}
+                                    >
+                                        {answer}
+                                    </Markdown>
+                                ) : (
+                                    <div>
+                                        {renderAnswerWithCitations(answer, messageSources || [])}
+                                    </div>
+                                )}
+                            </div>
+
+                            {questions && questions.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    {questions.map((q, idx) => (
+                                        <button
+                                            key={idx}
+                                            onClick={() => handleQuestionClick(q)}
+                                            className="flex items-center px-3 py-1.5 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full hover:bg-amber-500/20 transition-all duration-200"
+                                        >
+                                            <Sparkles className="w-3 h-3 mr-1.5" />
+                                            {q}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </motion.div>
+            );
+        });
+    }, [messages, sources, expandedThoughts, toggleThought, renderAnswerWithCitations, handleQuestionClick]);
 
     return (
-        <div className="flex-1 flex flex-col h-screen bg-black relative overflow-hidden">
+        <div className="flex-1 flex flex-col h-screen bg-[#050505] relative overflow-hidden">
+            {/* Background gradient glows */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-                <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-rose-600/5 blur-[100px]" />
-                <div className="absolute bottom-[-10%] left-[-5%] w-[500px] h-[500px] rounded-full bg-amber-600/5 blur-[100px]" />
+                <div className="absolute top-[-15%] right-[-10%] w-[600px] h-[600px] rounded-full bg-rose-600/[0.04] blur-[120px]" />
+                <div className="absolute bottom-[-15%] left-[-10%] w-[600px] h-[600px] rounded-full bg-amber-600/[0.04] blur-[120px]" />
             </div>
+
+            {/* Persona Header Bar */}
+            {personaSelector && (
+                <div className="flex items-center justify-between px-6 py-3 border-b border-white/[0.05] bg-black/60 backdrop-blur-xl z-20">
+                    <div className="flex items-center gap-3">
+                        {selectedPersona && (
+                            <>
+                                <span className="text-xl">{selectedPersona.avatar || '🤖'}</span>
+                                <div>
+                                    <div className="text-sm font-medium text-gray-200">{selectedPersona.name}</div>
+                                    <div className="text-xs text-gray-500">{selectedPersona.role}</div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                    {personaSelector}
+                </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6 z-10 scroll-smooth" ref={scrollRef}>
                 {messages.length === 0 && (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500/20 to-amber-500/20 flex items-center justify-center border border-white/10 backdrop-blur-sm">
-                            <Bot className="w-8 h-8 text-rose-400" />
+                    <div className="h-full flex flex-col items-center justify-center text-neutral-500 space-y-5">
+                        <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-rose-500/20 to-amber-500/20 flex items-center justify-center border border-white/[0.08] shadow-glow text-5xl">
+                            {selectedPersona?.avatar || '🤖'}
                         </div>
-                        <p className="text-lg font-medium">How can I help you today?</p>
+                        <p className="text-lg font-medium text-neutral-200">
+                            {selectedPersona ? `Chat with ${selectedPersona.name}` : 'How can I help you today?'}
+                        </p>
+                        {selectedPersona && (
+                            <p className="text-sm text-neutral-500 max-w-md text-center">
+                                {selectedPersona.role}
+                            </p>
+                        )}
                     </div>
                 )}
 
                 <AnimatePresence initial={false}>
-                    {messages.map((message, index) => {
-                        const isUser = message.role === 'user';
-                        const { thought, answer, questions } = !isUser ? parseAIResponse(message.content) : { thought: null, answer: message.content, questions: [] };
-
-                        // Check for sources in annotations (persisted) or data (streaming)
-                        const annotation = message.annotations?.find((a: any) => a.type === 'sources') as any;
-                        const messageSources = annotation?.sources || (index === messages.length - 1 ? sources : []);
-
-                        return (
-                            <motion.div
-                                key={message.id}
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.3 }}
-                                className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
-                            >
-                                <div className={`flex items-start max-w-[85%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser ? 'bg-rose-600 ml-3' : 'bg-gray-800 mr-3'
-                                        }`}>
-                                        {isUser ? <User className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-rose-400" />}
-                                    </div>
-
-                                    <div className="flex flex-col space-y-2 w-full">
-                                        {/* Sources Section (Collapsible) */}
-                                        {!isUser && messageSources && messageSources.length > 0 && (
-                                            <div className="bg-gray-900/50 border border-white/5 rounded-lg overflow-hidden mb-2">
-                                                <button
-                                                    onClick={() => toggleThought(`sources-${message.id}`)}
-                                                    className="w-full flex items-center px-3 py-2 text-xs text-amber-500/80 hover:text-amber-500 hover:bg-white/5 transition-colors"
-                                                >
-                                                    <BookOpen className="w-3 h-3 mr-2" />
-                                                    <span>Sources Used ({messageSources.length})</span>
-                                                    {expandedThoughts[`sources-${message.id}`] ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
-                                                </button>
-                                                <AnimatePresence>
-                                                    {expandedThoughts[`sources-${message.id}`] && (
-                                                        <motion.div
-                                                            initial={{ height: 0, opacity: 0 }}
-                                                            animate={{ height: 'auto', opacity: 1 }}
-                                                            exit={{ height: 0, opacity: 0 }}
-                                                            className="px-3 pb-3 space-y-2"
-                                                        >
-                                                            <div className="text-xs text-gray-500 font-mono border-t border-white/5 pt-2">
-                                                                {messageSources.map((source: any, idx: number) => (
-                                                                    <div key={idx} className="mb-2 last:mb-0">
-                                                                        <div className="font-semibold text-gray-400 mb-1">Source {idx + 1}</div>
-                                                                        <div className="line-clamp-2">{source.text}</div>
-                                                                        <button
-                                                                            onClick={() => setSelectedSource({ title: `Source ${idx + 1}`, content: source.text })}
-                                                                            className="text-rose-500 hover:underline mt-1"
-                                                                        >
-                                                                            View Full
-                                                                        </button>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </motion.div>
-                                                    )}
-                                                </AnimatePresence>
-                                            </div>
-                                        )}
-
-                                        {thought && (
-                                            <div className="bg-gray-900/50 border border-white/5 rounded-lg overflow-hidden">
-                                                <button
-                                                    onClick={() => toggleThought(message.id)}
-                                                    className="w-full flex items-center px-3 py-2 text-xs text-gray-400 hover:text-gray-300 hover:bg-white/5 transition-colors"
-                                                >
-                                                    <Brain className="w-3 h-3 mr-2" />
-                                                    <span>Thinking Process</span>
-                                                    {expandedThoughts[message.id] ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
-                                                </button>
-                                                <AnimatePresence>
-                                                    {expandedThoughts[message.id] && (
-                                                        <motion.div
-                                                            initial={{ height: 0, opacity: 0 }}
-                                                            animate={{ height: 'auto', opacity: 1 }}
-                                                            exit={{ height: 0, opacity: 0 }}
-                                                            className="px-3 pb-3"
-                                                        >
-                                                            <div className="text-xs text-gray-500 font-mono border-t border-white/5 pt-2">
-                                                                {thought}
-                                                            </div>
-                                                        </motion.div>
-                                                    )}
-                                                </AnimatePresence>
-                                            </div>
-                                        )}
-
-                                        <div
-                                            className={`p-4 rounded-2xl shadow-lg backdrop-blur-sm border ${isUser
-                                                ? 'bg-rose-600/10 border-rose-500/20 text-rose-50 rounded-tr-none'
-                                                : 'bg-gray-900/80 border-white/10 text-gray-100 rounded-tl-none'
-                                                }`}
-                                        >
-                                            {isUser ? (
-                                                <Markdown
-                                                    className="prose prose-invert prose-sm max-w-none"
-                                                    components={{
-                                                        pre: ({ node: _node, ...props }) => <div className="overflow-auto w-full my-2 bg-black/30 p-2 rounded" {...props as any} />,
-                                                        code: ({ node: _node, ...props }) => <code className="bg-black/30 px-1 py-0.5 rounded text-sm" {...props as any} />
-                                                    }}
-                                                >
-                                                    {answer}
-                                                </Markdown>
-                                            ) : (
-                                                <div>
-                                                    {renderAnswerWithCitations(answer, messageSources || [])}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {questions && questions.length > 0 && (
-                                            <div className="flex flex-wrap gap-2 mt-2">
-                                                {questions.map((q, idx) => (
-                                                    <button
-                                                        key={idx}
-                                                        onClick={() => handleQuestionClick(q)}
-                                                        className="flex items-center px-3 py-1.5 text-xs bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-full hover:bg-amber-500/20 transition-colors"
-                                                    >
-                                                        <Sparkles className="w-3 h-3 mr-1.5" />
-                                                        {q}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </motion.div>
-                        );
-                    })}
+                    {renderedMessages}
                 </AnimatePresence>
 
                 {isTyping && (
@@ -352,41 +505,61 @@ export function ChatArea({
                         className="flex justify-start"
                     >
                         <div className="flex items-center space-x-3">
-                            <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center">
+                            <div className="w-8 h-8 rounded-full bg-neutral-800/80 flex items-center justify-center border border-white/[0.06]">
                                 <Bot className="w-5 h-5 text-rose-400" />
                             </div>
                             <div className="flex flex-col space-y-1">
-                                <div className="bg-gray-900/50 border border-white/10 px-4 py-3 rounded-2xl rounded-tl-none flex items-center space-x-2">
-                                    <span className="w-2 h-2 bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                    <span className="w-2 h-2 bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                    <span className="w-2 h-2 bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                <div className="glass-card px-4 py-3 rounded-2xl rounded-tl-none flex items-center space-x-2">
+                                    <span className="w-2 h-2 bg-gradient-to-r from-rose-400 to-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                    <span className="w-2 h-2 bg-gradient-to-r from-rose-400 to-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                    <span className="w-2 h-2 bg-gradient-to-r from-rose-400 to-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                                 </div>
-                                <span className="text-xs text-gray-500 ml-1">{typingMessage}</span>
+                                <span className="text-xs text-neutral-500 ml-1">{typingMessage}</span>
+                                {/* RAG Status Indicator */}
+                                {ragStatus && (
+                                    <div className={`flex items-center gap-1.5 text-xs ml-1 ${ragStatus.error ? 'text-red-400' : ragStatus.found > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                        <Database className="w-3 h-3" />
+                                        {ragStatus.error ? (
+                                            <span>Search failed: {ragStatus.error}</span>
+                                        ) : ragStatus.found > 0 ? (
+                                            <span>Found {ragStatus.found} sources from vault</span>
+                                        ) : (
+                                            <span>No matching context found</span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </motion.div>
                 )}
             </div>
 
-            <div className="p-6 bg-black/40 backdrop-blur-xl border-t border-white/5 z-20 relative">
+            <div className="p-6 bg-[#0a0a0a]/90 backdrop-blur-xl border-t border-white/[0.05] z-20 relative texture-noise">
                 {/* Suggestions Dropdown */}
-                {showSuggestions && (
-                    <div className="absolute bottom-full mb-2 left-6 w-64 glass bg-black/90 rounded-lg shadow-2xl overflow-hidden z-50">
-                        <div className="p-2 text-xs text-gray-500 border-b border-white/5">Suggested Files</div>
-                        <div className="max-h-48 overflow-y-auto">
-                            {filteredFiles.map((file, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => insertFile(file)}
-                                    className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-white/10 transition-colors flex items-center"
-                                >
-                                    <BookOpen className="w-3 h-3 mr-2 text-rose-400" />
-                                    {file}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                <AnimatePresence>
+                    {showSuggestions && filteredFiles.length > 0 && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="absolute bottom-full mb-2 left-6 w-64 glass-card rounded-xl shadow-2xl overflow-hidden z-50"
+                        >
+                            <div className="p-2.5 text-xs text-neutral-500 border-b border-white/[0.06] font-medium">Suggested Files</div>
+                            <div className="max-h-48 overflow-y-auto">
+                                {filteredFiles.map((file, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => insertFile(file)}
+                                        className="w-full text-left px-3 py-2.5 text-sm text-neutral-300 hover:bg-white/[0.06] transition-colors flex items-center"
+                                    >
+                                        <BookOpen className="w-3 h-3 mr-2 text-rose-400" />
+                                        {file}
+                                    </button>
+                                ))}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
                     <Input
@@ -395,14 +568,15 @@ export function ChatArea({
                         value={input}
                         onChange={handleInputWrapper}
                         placeholder="Ask anything about your life... (Type @ to reference)"
-                        className="w-full pl-6 pr-14 py-7 bg-white/5 border-white/10 focus:border-rose-500/50 focus:ring-rose-500/20 rounded-2xl text-gray-100 placeholder:text-gray-500 shadow-xl transition-all hover:bg-white/10"
+                        className="w-full pl-6 pr-14 py-7 bg-neutral-900/80 border-white/[0.08] focus:border-rose-500/40 focus:ring-rose-500/20 rounded-2xl text-neutral-100 placeholder:text-neutral-500 shadow-glow transition-all hover:bg-neutral-900 hover:border-white/15"
                         autoComplete="off"
+                        disabled={isTyping}
                     />
                     <Button
                         type="submit"
                         size="icon"
                         disabled={!input.trim() || isTyping}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl w-10 h-10 bg-gradient-to-tr from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl w-10 h-10 bg-gradient-to-tr from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-glow-accent disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
                         <Send className="h-4 w-4" />
                     </Button>

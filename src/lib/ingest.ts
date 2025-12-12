@@ -35,7 +35,7 @@ export class VaultIngestor {
         console.log('Ingestion complete.');
     }
 
-    private getMarkdownFiles(dir: string): string[] {
+    public getMarkdownFiles(dir: string): string[] {
         let results: string[] = [];
         const list = fs.readdirSync(dir);
 
@@ -55,7 +55,7 @@ export class VaultIngestor {
         return results;
     }
 
-    private async processFile(filePath: string) {
+    public async processFile(filePath: string) {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
             const relativePath = path.relative(this.vaultPath, filePath);

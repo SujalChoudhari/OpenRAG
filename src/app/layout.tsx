@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/ui/toast";
 
 const outfit = Outfit({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "OpenRAG | Second Brain",
-  description: "Your personal intelligence layer.",
+  description: "Your personal intelligence layer powered by RAG and Ollama.",
+  keywords: ["RAG", "AI", "Ollama", "Second Brain", "Knowledge Base"],
 };
 
 export default function RootLayout({
@@ -17,8 +19,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${outfit.className} antialiased bg-black text-white overflow-hidden`}>
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );
 }
+

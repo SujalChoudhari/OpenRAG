@@ -1,10 +1,9 @@
-import { getAllSessions, deleteSession } from '@/lib/chat-history';
+import { clearAllSessions } from '@/lib/chat-history';
 import { NextResponse } from 'next/server';
+import type { ApiResponse } from '@/app/types';
 
 export async function DELETE() {
-    const sessions = getAllSessions();
-    sessions.forEach(session => {
-        deleteSession(session.id);
-    });
-    return NextResponse.json({ success: true });
+    const success = clearAllSessions();
+    return NextResponse.json<ApiResponse>({ success });
 }
+

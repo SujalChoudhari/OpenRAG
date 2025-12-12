@@ -1,23 +1,25 @@
 import fs from 'fs';
 import path from 'path';
-import { Message } from '../app/types';
+import type { Message, ChatSession } from '@/app/types';
 import { CONFIG } from './config';
+
+// Re-export types for convenience
+export type { ChatSession, Message } from '@/app/types';
 
 const SESSIONS_DIR = path.join(CONFIG.DATA_DIR, 'sessions');
 
 // Ensure directories exist
-if (!fs.existsSync(SESSIONS_DIR)) {
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+function ensureSessionsDir(): void {
+    if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    }
 }
 
-export interface ChatSession {
-    id: string;
-    title: string;
-    createdAt: number;
-    messages: Message[];
-}
+// Initialize on module load
+ensureSessionsDir();
 
 export function createSession(id: string, title: string = 'New Chat'): ChatSession {
+    ensureSessionsDir();
     const session: ChatSession = {
         id,
         title,
@@ -41,6 +43,7 @@ export function getSession(id: string): ChatSession | null {
 }
 
 export function saveSession(session: ChatSession): void {
+    ensureSessionsDir();
     const filePath = path.join(SESSIONS_DIR, `${session.id}.json`);
     try {
         fs.writeFileSync(filePath, JSON.stringify(session, null, 2));
@@ -51,13 +54,13 @@ export function saveSession(session: ChatSession): void {
 
 export function getAllSessions(): ChatSession[] {
     try {
-        if (!fs.existsSync(SESSIONS_DIR)) return [];
+        ensureSessionsDir();
         const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
         return files.map(file => {
             try {
                 const data = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
                 return JSON.parse(data);
-            } catch (e) {
+            } catch {
                 return null;
             }
         }).filter((s): s is ChatSession => s !== null)
@@ -68,9 +71,30 @@ export function getAllSessions(): ChatSession[] {
     }
 }
 
-export function deleteSession(id: string): void {
+export function deleteSession(id: string): boolean {
     const filePath = path.join(SESSIONS_DIR, `${id}.json`);
-    if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error(`Error deleting session ${id}:`, error);
+        return false;
+    }
+}
+
+export function clearAllSessions(): boolean {
+    try {
+        ensureSessionsDir();
+        const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+        for (const file of files) {
+            fs.unlinkSync(path.join(SESSIONS_DIR, file));
+        }
+        return true;
+    } catch (error) {
+        console.error('Error clearing all sessions:', error);
+        return false;
     }
 }
