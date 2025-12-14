@@ -2,8 +2,8 @@ import { createSession, getSession, saveSession, ChatSession } from '@/lib/chat-
 import { systemPrompt } from '@/lib/prompts';
 import { hierarchicalSearch } from '@/lib/vector-store';
 import { getSettings } from '@/lib/settings';
-import { convertToCoreMessages, streamText, generateText, StreamData } from 'ai';
-import { createOllama } from 'ollama-ai-provider';
+import { StreamData } from 'ai';
+import { Ollama } from 'ollama'; // Use native client directly
 import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '@/lib/config';
@@ -21,23 +21,28 @@ interface Source {
     similarity: number;
 }
 
-async function generateTitle(messages: { role: string; content: string }[], settings: ReturnType<typeof getSettings>): Promise<string> {
+async function generateTitle(aiResponse: string, settings: ReturnType<typeof getSettings>): Promise<string> {
     try {
-        const ollama = createOllama({ baseURL: settings.ollamaHost + '/api' });
-        const userMessage = messages.find(m => m.role === 'user')?.content || 'New Chat';
+        const ollama = new Ollama({ host: settings.ollamaHost });
+        const responsePreview = aiResponse.substring(0, 300);
 
         // Create a promise that rejects after timeout
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error('Title generation timeout')), TITLE_GENERATION_TIMEOUT);
         });
 
-        const generatePromise = generateText({
-            model: ollama(settings.chatModel),
-            prompt: `Generate a very short, concise title (max 4 words) for a chat that starts with this message: "${userMessage.substring(0, 200)}". Do not use quotes.`,
+        const generatePromise = ollama.chat({
+            model: settings.chatModel,
+            messages: [
+                { role: 'user', content: `Generate a very short, concise title (max 4 words) for a chat based on this AI response: "${responsePreview}". Do not use quotes. Just the title, nothing else.` }
+            ],
+            stream: false
         });
 
-        const { text } = await Promise.race([generatePromise, timeoutPromise]);
-        return text.trim().substring(0, 50); // Limit title length
+        // @ts-ignore
+        const response = await Promise.race([generatePromise, timeoutPromise]);
+        // @ts-ignore
+        return response.message.content.trim().substring(0, 20);
     } catch (error) {
         console.error('Error generating title:', error);
         return 'New Chat';
@@ -46,7 +51,6 @@ async function generateTitle(messages: { role: string; content: string }[], sett
 
 export async function POST(req: Request) {
     let session: ChatSession | null = null;
-    let streamData: StreamData | null = null;
 
     try {
         const { messages, sessionId, personaId, personaPrompt } = await req.json();
@@ -77,23 +81,11 @@ export async function POST(req: Request) {
         let sources: Source[] = [];
         let ragStatus = { searched: false, found: 0, error: null as string | null };
 
-        console.log('\n' + '='.repeat(60));
-        console.log('📚 RAG SEARCH - Query:', lastMessage.content.substring(0, 100) + '...');
-        console.log('='.repeat(60));
-
         try {
             const searchResult = await hierarchicalSearch(lastMessage.content);
             ragStatus.searched = true;
 
-            console.log('🔍 Search completed successfully');
-            console.log(`   Best Document: ${searchResult.bestDocument ? 'YES' : 'NO'}`);
-            console.log(`   Top Chunks: ${searchResult.topChunks.length}`);
-
             if (searchResult.bestDocument) {
-                console.log(`   📄 Best Match ID: ${searchResult.bestDocument.id}`);
-                console.log(`   📊 Similarity: ${(searchResult.bestDocument.score * 100).toFixed(1)}%`);
-                console.log(`   📝 Preview: ${searchResult.bestDocument.original_text.substring(0, 100)}...`);
-
                 context += `Best Matching Document:\n${searchResult.bestDocument.original_text}\n\n`;
                 sources.push({
                     id: searchResult.bestDocument.id,
@@ -104,9 +96,8 @@ export async function POST(req: Request) {
 
             if (searchResult.topChunks.length > 0) {
                 context += `Relevant Context from Vault:\n`;
-                searchResult.topChunks.forEach((chunk, index) => {
+                searchResult.topChunks.forEach((chunk) => {
                     const sourceFile = chunk.source || 'unknown';
-                    console.log(`   📄 Chunk ${index + 1}: ${sourceFile} (${(chunk.score * 100).toFixed(1)}%)`);
                     context += `--- From "${sourceFile}" ---\n${chunk.original_text}\n\n`;
                     sources.push({
                         id: chunk.id,
@@ -118,15 +109,11 @@ export async function POST(req: Request) {
             }
 
             ragStatus.found = sources.length;
-            console.log(`\n✅ Total sources found: ${sources.length}`);
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : 'Unknown error';
             ragStatus.error = errorMsg;
-            console.error('❌ RAG Search Error:', errorMsg);
-            console.error('   Stack:', error);
+            console.error('RAG Search Error:', errorMsg);
         }
-
-        console.log('='.repeat(60) + '\n');
 
         // Handle @filename referencing
         const fileRegex = /@([\w.-]+)/g;
@@ -156,22 +143,6 @@ export async function POST(req: Request) {
             });
         }
 
-        const ollama = createOllama({
-            baseURL: settings.ollamaHost + '/api',
-        });
-
-        // Generate title in background if it's the first user message
-        const userMessageCount = session.messages.filter(m => m.role === 'user').length;
-        if (userMessageCount === 1 && session) {
-            const sessionRef = session;
-            generateTitle(messages, settings).then(title => {
-                sessionRef.title = title;
-                saveSession(sessionRef);
-            }).catch(console.error);
-        }
-
-        streamData = new StreamData();
-        streamData.append({ sources, ragStatus });
 
         // Build system prompt: persona + RAG context
         let finalPrompt: string;
@@ -179,165 +150,130 @@ export async function POST(req: Request) {
         if (personaPrompt) {
             // Persona-based conversation: combine persona prompt with RAG context
             finalPrompt = `${personaPrompt}\n\n---\n\n## Retrieved Knowledge Context\n${context || 'No specific context retrieved for this query.'}\n\n---\n\nRemember to stay in character while using the above context to inform your response.`;
-        } else if (settings.systemPrompt) {
-            // Custom system prompt from settings
-            finalPrompt = settings.systemPrompt.replace('${sources}', context);
         } else {
             // Default RAG prompt
             finalPrompt = systemPrompt(context);
         }
 
-        // Detect if this is a reasoning/thinking model
-        const isThinkingModel = settings.chatModel.toLowerCase().includes('deepseek') ||
-            settings.chatModel.toLowerCase().includes('qwen') ||
-            settings.chatModel.toLowerCase().includes('r1');
+        const ollamaClient = new Ollama({ host: settings.ollamaHost });
+        const encoder = new TextEncoder();
 
-        console.log(`🧠 Thinking model detected: ${isThinkingModel ? 'YES' : 'NO'} (${settings.chatModel})`);
-
-        // HYBRID HANDLER: Use native Ollama client for thinking models to support 'think: true'
-        if (isThinkingModel) {
-            const { Ollama } = await import('ollama'); // Dynamic import to avoid build issues if missing
-            const ollamaClient = new Ollama({ host: settings.ollamaHost });
-
-            // Initial data stream with retrieved headers
-            if (streamData) {
-                // We need to manually send the data part first in the stream
-                // The AI SDK's toDataStreamResponse handles this, but here we are manual.
-                // We'll construct a ReadableStream that matches the Data Stream Protocol.
-            }
-
-            const encoder = new TextEncoder();
-            const stream = new ReadableStream({
-                async start(controller) {
-                    // Send initial data (sources)
-                    if (streamData) {
-                        try {
-                            // Format: d:{"sources":[...]}\n
-                            // We construct the data object manually
-                            const dataPayload = JSON.stringify([{
-                                sources,
-                                ragStatus
-                            }]);
-                            // Note: AI SDK format for StreamData is roughly JSON list of appended items
-                            // But simplify: just send the raw JSON as a data part
-                            controller.enqueue(encoder.encode(`2:${dataPayload}\n`));
-                        } catch (e) {
-                            console.error('Error sending stream data:', e);
-                        }
-                    }
-
-                    let fullText = '';
-                    let isThinking = false;
-
+        // UNIFIED NATIVE HANDLER
+        const stream = new ReadableStream({
+            async start(controller) {
+                // Helper for safe enqueuing
+                const safeEnqueue = (chunk: Uint8Array) => {
                     try {
-                        const response = await ollamaClient.chat({
-                            model: settings.chatModel,
-                            messages: [
-                                { role: 'system', content: finalPrompt },
-                                ...messages.map((m: any) => ({ role: m.role, content: m.content }))
-                            ],
-                            stream: true,
-                            options: {
-                                // @ts-ignore - native client supports this
-                                think: true
-                            }
-                        });
+                        controller.enqueue(chunk);
+                    } catch (e) {
+                        // Ignore if controller is closed
+                    }
+                };
 
-                        for await (const part of response) {
-                            // Handle thinking content
-                            // @ts-ignore
-                            const thinkChunk = part.message?.thinking;
-                            // @ts-ignore
-                            const contentChunk = part.message?.content;
+                // Send initial data (sources)
+                try {
+                    // Format: 2:JSON\n (Data protocol)
+                    const dataPayload = JSON.stringify([{
+                        sources,
+                        ragStatus
+                    }]);
+                    safeEnqueue(encoder.encode(`2:${dataPayload}\n`));
+                } catch (e) {
+                    console.error('Error sending stream data:', e);
+                }
 
-                            if (thinkChunk) {
-                                if (!isThinking) {
-                                    controller.enqueue(encoder.encode(`0:<think>`));
-                                    isThinking = true;
-                                }
-                                controller.enqueue(encoder.encode(`0:${thinkChunk}`));
-                            }
+                let fullText = '';
+                let fullThinking = '';
+                let wasThinking = false;
+                let sentThinkingOpen = false;
 
-                            if (contentChunk) {
-                                if (isThinking) {
-                                    controller.enqueue(encoder.encode(`0:</think>`));
-                                    isThinking = false;
-                                }
-                                controller.enqueue(encoder.encode(`0:${contentChunk}`));
-                                fullText += contentChunk;
+                try {
+
+                    const response = await ollamaClient.chat({
+                        model: settings.chatModel,
+                        messages: [
+                            { role: 'system', content: finalPrompt },
+                            ...messages.map((m: any) => ({ role: m.role, content: m.content }))
+                        ],
+                        stream: true,
+                        keep_alive: '30m', // Keep model loaded in memory to reduce TTFT
+                    });
+
+                    let chunkIndex = 0;
+                    for await (const part of response) {
+                        chunkIndex++;
+
+
+                        // Handle thinking tokens (from thinking models like qwen3, deepseek-r1)
+                        const thinking = (part.message as any).thinking;
+                        if (thinking) {
+                            wasThinking = true;
+                            // Send opening tag on first thinking token
+                            if (!sentThinkingOpen) {
+                                safeEnqueue(encoder.encode(`0:${JSON.stringify('<think>')}\n`));
+                                sentThinkingOpen = true;
                             }
+                            // Send thinking content as regular text
+                            safeEnqueue(encoder.encode(`0:${JSON.stringify(thinking)}\n`));
+                            fullThinking += thinking;
                         }
 
-                        // Ensure thinking is closed if stream ends while thinking
-                        if (isThinking) {
-                            controller.enqueue(encoder.encode(`0:</think>`));
-                            isThinking = false;
-                        }
-
-                    } catch (err) {
-                        console.error('Ollama stream error:', err);
-                        controller.enqueue(encoder.encode(`0:\n\nError: ${err}\n`));
-                    } finally {
-                        if (isThinking) {
-                            try { controller.enqueue(encoder.encode(`0:</think>`)); } catch { }
-                            isThinking = false;
-                        }
-                        controller.close();
-
-                        // Save session complete
-                        if (session) {
-                            session.messages.push({
-                                id: Date.now().toString(),
-                                role: 'assistant',
-                                content: fullText || '...',
-                                annotations: [{ type: 'sources', sources }]
-                            });
-                            saveSession(session);
+                        const content = part.message.content;
+                        if (content) {
+                            // If we were thinking and now have content, close thinking tag
+                            if (wasThinking && sentThinkingOpen) {
+                                safeEnqueue(encoder.encode(`0:${JSON.stringify('</think>')}\n`));
+                                wasThinking = false;
+                            }
+                            // Send content as regular text
+                            safeEnqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+                            fullText += content;
                         }
                     }
-                }
-            });
+                } catch (err) {
+                    console.error('Ollama stream error:', err);
+                    safeEnqueue(encoder.encode(`0:${JSON.stringify(`\n\nError: ${err}\n`)}\n`));
+                } finally {
+                    try {
+                        controller.close();
+                    } catch (e) {
+                        // Ignore if already closed
+                    }
 
-            return new Response(stream, {
-                headers: {
-                    'Content-Type': 'text/plain; charset=utf-8',
-                    'X-Session-Id': session.id
-                }
-            });
-
-        } else {
-            // STANDARD HANDLER (Vercel AI SDK)
-            const result = await streamText({
-                model: ollama(settings.chatModel),
-                system: finalPrompt,
-                messages: convertToCoreMessages(messages),
-                onFinish: async (completion) => {
+                    // Save session complete
                     if (session) {
                         session.messages.push({
                             id: Date.now().toString(),
                             role: 'assistant',
-                            content: completion.text,
+                            content: fullText || '...',
                             annotations: [{ type: 'sources', sources }]
                         });
                         saveSession(session);
-                    }
-                    if (streamData) streamData.close();
-                }
-            });
 
-            return result.toDataStreamResponse({
-                data: streamData,
-                headers: {
-                    'X-Session-Id': session.id
+                        // Generate title after first AI response
+                        const userMessageCount = session.messages.filter(m => m.role === 'user').length;
+                        if (userMessageCount === 1 && fullText) {
+                            generateTitle(fullText, settings).then(title => {
+                                if (session) {
+                                    session.title = title;
+                                    saveSession(session);
+                                }
+                            }).catch(console.error);
+                        }
+                    }
                 }
-            });
-        }
+            }
+        });
+
+        return new Response(stream, {
+            headers: {
+                'Content-Type': 'text/plain; charset=utf-8',
+                'X-Session-Id': session.id
+            }
+        });
+
     } catch (error) {
         console.error('Chat error:', error);
-
-        if (streamData) {
-            try { streamData.close(); } catch { }
-        }
 
         // Determine error type and provide helpful message
         let errorMessage = 'Error generating response';

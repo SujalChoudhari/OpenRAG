@@ -12,14 +12,10 @@ const SettingsSchema = z.object({
     ollamaHost: z.string().url().or(z.string().regex(/^http:\/\/\d+\.\d+\.\d+\.\d+:\d+$/)),
     embeddingModel: z.string().min(1),
     chatModel: z.string().min(1),
-    summarizationModel: z.string().min(1),
-    summaryTemperature: z.number().min(0).max(2),
-    maxSummaryLength: z.number().int().positive(),
-    retrievalCollectionCount: z.number().int().positive(),
     retrievalDocumentCount: z.number().int().positive(),
     retrievalChunkCount: z.number().int().positive(),
-    systemPrompt: z.string(),
     vaultPath: z.string(),
+    onboardingCompleted: z.boolean(),
 });
 
 const SETTINGS_FILE = path.join(CONFIG.DATA_DIR, 'settings.json');
@@ -28,14 +24,10 @@ const DEFAULT_SETTINGS: Settings = {
     ollamaHost: CONFIG.OLLAMA_HOST,
     embeddingModel: CONFIG.OLLAMA_EMBEDDING_MODEL,
     chatModel: CONFIG.OLLAMA_CHAT_MODEL,
-    summarizationModel: CONFIG.OLLAMA_CHAT_MODEL,
-    summaryTemperature: 0.3,
-    maxSummaryLength: 100,
-    retrievalCollectionCount: 3,
     retrievalDocumentCount: 5,
     retrievalChunkCount: 5,
-    systemPrompt: '',
-    vaultPath: 'F:\\Workspace\\ObsidianVault\\Sujal',
+    vaultPath: '',  // Configured during onboarding
+    onboardingCompleted: false,
 };
 
 export function getSettings(): Settings {

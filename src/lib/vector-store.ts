@@ -40,7 +40,6 @@ export async function createEmbedding(text: string): Promise<EmbeddingResponse> 
         // Set vector dimension based on actual model output (first time only)
         if (!dimensionInitialized && response.embeddings.length > 0) {
             const dim = response.embeddings[0].length;
-            console.log(`Detected embedding dimension: ${dim} for model ${settings.embeddingModel}`);
             setVectorDimension(dim);
             dimensionInitialized = true;
         }
@@ -55,7 +54,6 @@ export async function createEmbedding(text: string): Promise<EmbeddingResponse> 
 export async function clearDatabase(): Promise<void> {
     await resetTable('vectors');
     dimensionInitialized = false; // Reset so next embedding will set dimension
-    console.log('Database cleared.');
 }
 
 async function upsertRecord(record: VectorRecord): Promise<void> {
@@ -152,10 +150,8 @@ export async function storeChunksBatch(
 }
 
 export async function removeEmbedding(filename: string): Promise<void> {
-    console.log(`Removing embeddings for file: ${filename}`);
     // Use safe delete to prevent SQL injection
     await safeDelete('vectors', 'source', filename);
-    console.log(`Embeddings for ${filename} deleted`);
 }
 
 export async function similaritySearch(
@@ -205,7 +201,7 @@ export async function hierarchicalSearch(query: string): Promise<HierarchicalSea
     const documents = await similaritySearch(query, settings.retrievalDocumentCount, 'document');
     const chunks = await similaritySearch(query, settings.retrievalChunkCount, 'chunk');
 
-    console.log(`   📑 Documents found: ${documents.length}, Chunks found: ${chunks.length}`);
+
 
     // If we have a high scoring document, promote it
     const bestDocument = documents.length > 0 ? {

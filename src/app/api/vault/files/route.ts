@@ -5,14 +5,23 @@ import { getSettings } from '@/lib/settings';
 
 export async function GET(_req: NextRequest) {
     try {
-        const ingestor = new VaultIngestor();
         const settings = getSettings();
 
-        // Use the public method we verified earlier
+        // Check if vault is configured
+        if (!settings.vaultPath || settings.vaultPath.trim() === '') {
+            return NextResponse.json({
+                success: false,
+                files: [],
+                needsSetup: true,
+                error: 'Knowledge base path not configured. Please set it in Settings.'
+            });
+        }
+
+        const ingestor = new VaultIngestor();
         const files = ingestor.getMarkdownFiles(settings.vaultPath);
 
         // Convert to relative paths for cleaner UI
-        const relativeFiles = files.map(f => ({
+        const relativeFiles = files.map((f: string) => ({
             id: path.relative(settings.vaultPath, f),
             path: path.relative(settings.vaultPath, f),
             name: path.basename(f, '.md'),

@@ -10,6 +10,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -44,14 +45,10 @@ const DEFAULT_SETTINGS: Settings = {
     ollamaHost: 'http://127.0.0.1:11434',
     embeddingModel: '',
     chatModel: '',
-    summarizationModel: '',
-    summaryTemperature: 0.3,
-    maxSummaryLength: 100,
-    retrievalCollectionCount: 3,
     retrievalDocumentCount: 5,
     retrievalChunkCount: 5,
-    systemPrompt: '',
     vaultPath: '',
+    onboardingCompleted: false,
 };
 
 export function SettingsDialog() {
@@ -71,6 +68,7 @@ export function SettingsDialog() {
         message: '',
         errors: 0
     });
+    const [reindexModalOpen, setReindexModalOpen] = useState(false);
     const { showToast } = useToast();
 
     const fetchSettings = useCallback(async () => {
@@ -152,8 +150,27 @@ export function SettingsDialog() {
         }
     };
 
+    const handleIngestClick = () => {
+        setReindexModalOpen(true);
+    };
+
     const handleIngest = async () => {
-        if (!confirm('This will scan the vault and re-index all files. Continue?')) return;
+        setReindexModalOpen(false);
+
+        // Auto-save settings before ingesting to ensure we use the current configuration
+        setLoading(true);
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings),
+            });
+        } catch {
+            showToast('Failed to save settings before ingestion', 'error');
+            setLoading(false);
+            return;
+        }
+        setLoading(false);
 
         setProgress({
             isActive: true,
@@ -243,7 +260,6 @@ export function SettingsDialog() {
                 }
             }
         } catch (error) {
-            console.error('Ingestion failed:', error);
             setProgress(p => ({
                 ...p,
                 status: 'error',
@@ -329,193 +345,181 @@ export function SettingsDialog() {
     );
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-white/5">
-                    <SettingsIcon className="h-5 w-5" />
-                </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px] bg-black/90 backdrop-blur-xl text-gray-100 border-white/10">
-                <DialogHeader>
-                    <DialogTitle className="text-xl font-bold bg-gradient-to-r from-rose-500 to-amber-500 bg-clip-text text-transparent">Settings</DialogTitle>
-                    <DialogDescription className="text-gray-400">
-                        Configure your RAG pipeline settings.
-                    </DialogDescription>
-                </DialogHeader>
+        <>
+            <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                    <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-white/5">
+                        <SettingsIcon className="h-5 w-5" />
+                    </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[600px] bg-black/90 backdrop-blur-xl text-gray-100 border-white/10">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold bg-gradient-to-r from-rose-500 to-amber-500 bg-clip-text text-transparent">Settings</DialogTitle>
+                        <DialogDescription className="text-gray-400">
+                            Configure your RAG pipeline settings.
+                        </DialogDescription>
+                    </DialogHeader>
 
-                {loadingSettings ? (
-                    <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
-                    </div>
-                ) : (
-                    <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-                        {/* Ollama Settings */}
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="host" className="text-right text-gray-300">
-                                Ollama Host
-                            </Label>
-                            <Input
-                                id="host"
-                                value={settings.ollamaHost}
-                                onChange={(e) => updateSetting('ollamaHost', e.target.value)}
-                                className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:border-rose-500/50 focus:ring-rose-500/20"
-                                placeholder="http://127.0.0.1:11434"
-                            />
+                    {loadingSettings ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
                         </div>
-
-                        {renderModelSelect('embedding', 'Embedding', settings.embeddingModel, (val) => updateSetting('embeddingModel', val))}
-                        {renderModelSelect('chat', 'Chat Model', settings.chatModel, (val) => updateSetting('chatModel', val))}
-
-                        <div className="border-t border-white/10 my-2"></div>
-                        <div className="text-sm font-semibold text-rose-400 mb-2">Second Brain (Vault)</div>
-
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="vault" className="text-right text-gray-300">
-                                Vault Path
-                            </Label>
-                            <Input
-                                id="vault"
-                                value={settings.vaultPath}
-                                onChange={(e) => updateSetting('vaultPath', e.target.value)}
-                                className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:border-rose-500/50 focus:ring-rose-500/20"
-                                placeholder="F:\Workspace\ObsidianVault"
-                            />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4 mt-2">
-                            <div className="col-start-2 col-span-3">
-                                <AnimatePresence mode="wait">
-                                    {progress.isActive ? (
-                                        <motion.div
-                                            key="progress"
-                                            initial={{ opacity: 0, height: 0 }}
-                                            animate={{ opacity: 1, height: 'auto' }}
-                                            exit={{ opacity: 0, height: 0 }}
-                                            className="space-y-3 p-4 rounded-lg bg-white/5 border border-white/10"
-                                        >
-                                            <div className="flex items-center justify-between text-sm">
-                                                <div className="flex items-center gap-2">
-                                                    {progress.status === 'complete' ? (
-                                                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                                                    ) : progress.status === 'error' ? (
-                                                        <XCircle className="w-4 h-4 text-red-400" />
-                                                    ) : (
-                                                        <FolderSync className="w-4 h-4 text-rose-400 animate-spin" />
-                                                    )}
-                                                    <span className={progress.status === 'complete' ? 'text-emerald-400' : progress.status === 'error' ? 'text-red-400' : 'text-gray-300'}>
-                                                        {progress.message}
-                                                    </span>
-                                                </div>
-                                                <span className="text-gray-500 text-xs">{progress.percent}%</span>
-                                            </div>
-
-                                            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                                                <motion.div
-                                                    className={`h-full rounded-full ${progress.status === 'complete' ? 'bg-emerald-500' : progress.status === 'error' ? 'bg-red-500' : 'bg-gradient-to-r from-rose-500 to-amber-500'}`}
-                                                    initial={{ width: 0 }}
-                                                    animate={{ width: `${progress.percent}%` }}
-                                                    transition={{ duration: 0.3 }}
-                                                />
-                                            </div>
-
-                                            {progress.currentFile && progress.status === 'indexing' && (
-                                                <div className="text-xs text-gray-500 truncate">
-                                                    📄 {progress.currentFile}
-                                                </div>
-                                            )}
-
-                                            {progress.errors > 0 && (
-                                                <div className="text-xs text-amber-400">
-                                                    ⚠️ {progress.errors} file(s) had errors
-                                                </div>
-                                            )}
-
-                                            {(progress.status === 'complete' || progress.status === 'error') && (
-                                                <Button
-                                                    onClick={resetProgress}
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="w-full text-gray-400 hover:text-white"
-                                                >
-                                                    Dismiss
-                                                </Button>
-                                            )}
-                                        </motion.div>
-                                    ) : (
-                                        <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                                            <Button
-                                                onClick={handleIngest}
-                                                variant="secondary"
-                                                size="sm"
-                                                className="w-full bg-white/10 hover:bg-white/20 text-rose-200"
-                                            >
-                                                <FolderSync className="w-4 h-4 mr-2" />
-                                                Re-index Vault
-                                            </Button>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
+                    ) : (
+                        <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                            {/* Ollama Settings */}
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="host" className="text-right text-gray-300">
+                                    Ollama Host
+                                </Label>
+                                <Input
+                                    id="host"
+                                    value={settings.ollamaHost}
+                                    onChange={(e) => updateSetting('ollamaHost', e.target.value)}
+                                    className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:border-rose-500/50 focus:ring-rose-500/20"
+                                    placeholder="http://127.0.0.1:11434"
+                                />
                             </div>
+
+                            {renderModelSelect('embedding', 'Embedding', settings.embeddingModel, (val) => updateSetting('embeddingModel', val))}
+                            {renderModelSelect('chat', 'Chat Model', settings.chatModel, (val) => updateSetting('chatModel', val))}
+
+                            <div className="border-t border-white/10 my-2"></div>
+                            <div className="text-sm font-semibold text-rose-400 mb-2">Knowledge Base</div>
+
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="vault" className="text-right text-gray-300">
+                                    Vault Path
+                                </Label>
+                                <Input
+                                    id="vault"
+                                    value={settings.vaultPath}
+                                    onChange={(e) => updateSetting('vaultPath', e.target.value)}
+                                    className="col-span-3 bg-white/5 border-white/10 text-gray-100 focus:border-rose-500/50 focus:ring-rose-500/20"
+                                    placeholder="F:\Workspace\ObsidianVault"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4 mt-2">
+                                <div className="col-start-2 col-span-3">
+                                    <AnimatePresence mode="wait">
+                                        {progress.isActive ? (
+                                            <motion.div
+                                                key="progress"
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="space-y-3 p-4 rounded-lg bg-white/5 border border-white/10"
+                                            >
+                                                <div className="flex items-center justify-between text-sm">
+                                                    <div className="flex items-center gap-2">
+                                                        {progress.status === 'complete' ? (
+                                                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                                        ) : progress.status === 'error' ? (
+                                                            <XCircle className="w-4 h-4 text-red-400" />
+                                                        ) : (
+                                                            <FolderSync className="w-4 h-4 text-rose-400 animate-spin" />
+                                                        )}
+                                                        <span className={progress.status === 'complete' ? 'text-emerald-400' : progress.status === 'error' ? 'text-red-400' : 'text-gray-300'}>
+                                                            {progress.message}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-gray-500 text-xs">{progress.percent}%</span>
+                                                </div>
+
+                                                <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                                    <motion.div
+                                                        className={`h-full rounded-full ${progress.status === 'complete' ? 'bg-emerald-500' : progress.status === 'error' ? 'bg-red-500' : 'bg-gradient-to-r from-rose-500 to-amber-500'}`}
+                                                        initial={{ width: 0 }}
+                                                        animate={{ width: `${progress.percent}%` }}
+                                                        transition={{ duration: 0.3 }}
+                                                    />
+                                                </div>
+
+                                                {progress.currentFile && progress.status === 'indexing' && (
+                                                    <div className="text-xs text-gray-500 truncate">
+                                                        📄 {progress.currentFile}
+                                                    </div>
+                                                )}
+
+                                                {progress.errors > 0 && (
+                                                    <div className="text-xs text-amber-400">
+                                                        ⚠️ {progress.errors} file(s) had errors
+                                                    </div>
+                                                )}
+
+                                                {(progress.status === 'complete' || progress.status === 'error') && (
+                                                    <Button
+                                                        onClick={resetProgress}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="w-full text-gray-400 hover:text-white"
+                                                    >
+                                                        Dismiss
+                                                    </Button>
+                                                )}
+                                            </motion.div>
+                                        ) : (
+                                            <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                                                <Button
+                                                    onClick={handleIngestClick}
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    className="w-full bg-white/10 hover:bg-white/20 text-rose-200"
+                                                >
+                                                    <FolderSync className="w-4 h-4 mr-2" />
+                                                    Re-index Vault
+                                                </Button>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            </div>
+
+                            <div className="border-t border-white/10 my-2"></div>
+                            <div className="text-sm font-semibold text-rose-400 mb-2">Retrieval Counts</div>
+
+                            {renderNumberInput('doc-count', 'Documents', settings.retrievalDocumentCount, (val) => updateSetting('retrievalDocumentCount', Math.round(val)))}
+                            {renderNumberInput('chunk-count', 'Chunks', settings.retrievalChunkCount, (val) => updateSetting('retrievalChunkCount', Math.round(val)))}
                         </div>
+                    )}
 
-                        <div className="border-t border-white/10 my-2"></div>
-                        <div className="text-sm font-semibold text-rose-400 mb-2">Summarization</div>
+                    <DialogFooter className="flex gap-2">
+                        <Button
+                            onClick={handleResetToDefaults}
+                            variant="ghost"
+                            size="sm"
+                            className="text-gray-400 hover:text-white"
+                            disabled={loading || loadingSettings}
+                        >
+                            <RotateCcw className="w-4 h-4 mr-2" />
+                            Reset
+                        </Button>
+                        <Button
+                            onClick={handleSave}
+                            disabled={loading || loadingSettings}
+                            className="bg-rose-600 hover:bg-rose-700 text-white border-0"
+                        >
+                            {loading ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    Saving...
+                                </>
+                            ) : (
+                                'Save changes'
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
-                        {renderModelSelect('summarization', 'Model', settings.summarizationModel, (val) => updateSetting('summarizationModel', val))}
-                        {renderNumberInput('temp', 'Temp', settings.summaryTemperature, (val) => updateSetting('summaryTemperature', val), { min: 0, max: 2, step: 0.1 })}
-                        {renderNumberInput('length', 'Max Len', settings.maxSummaryLength, (val) => updateSetting('maxSummaryLength', Math.round(val)))}
-
-                        <div className="border-t border-white/10 my-2"></div>
-                        <div className="text-sm font-semibold text-rose-400 mb-2">Retrieval Counts</div>
-
-                        {renderNumberInput('col-count', 'Collections', settings.retrievalCollectionCount, (val) => updateSetting('retrievalCollectionCount', Math.round(val)))}
-                        {renderNumberInput('doc-count', 'Documents', settings.retrievalDocumentCount, (val) => updateSetting('retrievalDocumentCount', Math.round(val)))}
-                        {renderNumberInput('chunk-count', 'Chunks', settings.retrievalChunkCount, (val) => updateSetting('retrievalChunkCount', Math.round(val)))}
-
-                        <div className="border-t border-white/10 my-2"></div>
-                        <div className="text-sm font-semibold text-rose-400 mb-2">System Prompt</div>
-
-                        <div className="grid gap-2">
-                            <Label htmlFor="prompt" className="text-gray-300">
-                                Custom Prompt (Leave empty for default)
-                            </Label>
-                            <textarea
-                                id="prompt"
-                                value={settings.systemPrompt}
-                                onChange={(e) => updateSetting('systemPrompt', e.target.value)}
-                                className="w-full h-32 bg-white/5 border border-white/10 rounded-md p-2 text-sm text-gray-100 focus:border-rose-500/50 focus:ring-rose-500/20 resize-none"
-                                placeholder="Enter custom system prompt..."
-                            />
-                        </div>
-                    </div>
-                )}
-
-                <DialogFooter className="flex gap-2">
-                    <Button
-                        onClick={handleResetToDefaults}
-                        variant="ghost"
-                        size="sm"
-                        className="text-gray-400 hover:text-white"
-                        disabled={loading || loadingSettings}
-                    >
-                        <RotateCcw className="w-4 h-4 mr-2" />
-                        Reset
-                    </Button>
-                    <Button
-                        onClick={handleSave}
-                        disabled={loading || loadingSettings}
-                        className="bg-rose-600 hover:bg-rose-700 text-white border-0"
-                    >
-                        {loading ? (
-                            <>
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                Saving...
-                            </>
-                        ) : (
-                            'Save changes'
-                        )}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+            <ConfirmModal
+                open={reindexModalOpen}
+                onConfirm={handleIngest}
+                onCancel={() => setReindexModalOpen(false)}
+                title="Re-index Vault"
+                description="This will scan the vault and re-index all files. This may take a while for large vaults."
+                confirmText="Re-index"
+                variant="warning"
+            />
+        </>
     );
 }

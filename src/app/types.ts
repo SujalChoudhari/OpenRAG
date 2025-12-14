@@ -23,14 +23,10 @@ export interface Settings {
     ollamaHost: string;
     embeddingModel: string;
     chatModel: string;
-    summarizationModel: string;
-    summaryTemperature: number;
-    maxSummaryLength: number;
-    retrievalCollectionCount: number;
     retrievalDocumentCount: number;
     retrievalChunkCount: number;
-    systemPrompt: string;
     vaultPath: string;
+    onboardingCompleted: boolean;
 }
 
 // API Response types

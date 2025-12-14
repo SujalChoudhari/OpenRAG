@@ -17,25 +17,28 @@ export class VaultIngestor {
     }
 
     async scanAndIngest() {
-        console.log(`Scanning vault at: ${this.vaultPath}`);
         if (!fs.existsSync(this.vaultPath)) {
             console.error(`Vault path does not exist: ${this.vaultPath}`);
             return;
         }
 
         const files = this.getMarkdownFiles(this.vaultPath);
-        console.log(`Found ${files.length} markdown files.`);
 
-        let processed = 0;
         for (const file of files) {
             await this.processFile(file);
-            processed++;
-            if (processed % 10 === 0) console.log(`Processed ${processed}/${files.length} files...`);
         }
-        console.log('Ingestion complete.');
     }
 
     public getMarkdownFiles(dir: string): string[] {
+        // Guard against empty or invalid path
+        if (!dir || dir.trim() === '') {
+            return [];
+        }
+
+        if (!fs.existsSync(dir)) {
+            return [];
+        }
+
         let results: string[] = [];
         const list = fs.readdirSync(dir);
 

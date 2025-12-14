@@ -8,9 +8,12 @@ export async function GET() {
 
     try {
         const list = await ollama.list();
-        return NextResponse.json(list);
+        return NextResponse.json({
+            success: true,
+            models: list.models || []
+        });
     } catch (error) {
         console.error('Error fetching models:', error);
-        return NextResponse.json({ models: [] }, { status: 500 });
+        return NextResponse.json({ success: false, models: [] }, { status: 500 });
     }
 }

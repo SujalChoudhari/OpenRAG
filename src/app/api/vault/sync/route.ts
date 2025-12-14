@@ -1,5 +1,6 @@
 import { VaultWatcher } from '@/lib/vault-watcher';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSettings } from '@/lib/settings';
 
 export const maxDuration = 300; // Allow 5 minutes for sync
 
@@ -9,6 +10,17 @@ export const maxDuration = 300; // Allow 5 minutes for sync
  */
 export async function GET(req: NextRequest) {
     try {
+        // Check if vault is configured
+        const settings = getSettings();
+        if (!settings.vaultPath || settings.vaultPath.trim() === '') {
+            return NextResponse.json({
+                success: true,
+                hasChanges: false,
+                needsSetup: true,
+                changes: { newFiles: [], modifiedFiles: [], deletedFiles: [] }
+            });
+        }
+
         const checkOnly = req.nextUrl.searchParams.get('checkOnly') === 'true';
         const watcher = new VaultWatcher();
 

@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TextureButton } from "@/components/ui/texture-button";
 import { TextureSeparator } from "@/components/ui/texture-card";
-import { File, Trash2, Upload, PlusCircle, MessageSquare, Loader2 } from 'lucide-react';
+import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { File, Trash2, Upload, PlusCircle, MessageSquare, Loader2, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { getVaultStats } from "@/app/actions";
 import * as React from 'react';
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { SettingsDialog } from "./settings-dialog";
 import { useToast } from "./ui/toast";
 import Image from 'next/image';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface SidebarProps {
     files: string[];
@@ -21,6 +23,8 @@ interface SidebarProps {
     currentSessionId: string | null;
     uploadLogs: string[];
     isLoadingSession?: boolean;
+    isCollapsed?: boolean;
+    onToggleCollapse?: () => void;
 }
 
 interface ChatSession {
@@ -37,13 +41,20 @@ export function Sidebar({
     onSelectSession,
     currentSessionId,
     uploadLogs,
-    isLoadingSession = false
+    isLoadingSession = false,
+    isCollapsed = false,
+    onToggleCollapse
 }: SidebarProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [vaultCount, setVaultCount] = useState(0);
     const [loadingSessions, setLoadingSessions] = useState(true);
     const { showToast } = useToast();
+
+    // Confirm modal states
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [clearModalOpen, setClearModalOpen] = useState(false);
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
     const fetchSessions = useCallback(async () => {
         try {
@@ -75,34 +86,43 @@ export function Sidebar({
         fileInputRef.current?.click();
     };
 
-    const deleteSession = async (e: React.MouseEvent, id: string) => {
+    const handleDeleteClick = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        if (confirm('Are you sure you want to delete this chat?')) {
-            try {
-                await fetch(`/api/history/${id}`, { method: 'DELETE' });
-                fetchSessions();
-                if (currentSessionId === id) {
-                    onReset();
-                }
-                showToast('Chat deleted', 'success');
-            } catch (error) {
-                console.error('Failed to delete session:', error);
-                showToast('Failed to delete chat', 'error');
+        setPendingDeleteId(id);
+        setDeleteModalOpen(true);
+    };
+
+    const confirmDeleteSession = async () => {
+        if (!pendingDeleteId) return;
+        try {
+            await fetch(`/api/history/${pendingDeleteId}`, { method: 'DELETE' });
+            fetchSessions();
+            if (currentSessionId === pendingDeleteId) {
+                onReset();
             }
+            showToast('Chat deleted', 'success');
+        } catch {
+            showToast('Failed to delete chat', 'error');
+        } finally {
+            setDeleteModalOpen(false);
+            setPendingDeleteId(null);
         }
     };
 
-    const clearHistory = async () => {
-        if (confirm('Are you sure you want to clear ALL chat history? This cannot be undone.')) {
-            try {
-                await fetch('/api/history/clear', { method: 'DELETE' });
-                fetchSessions();
-                onReset();
-                showToast('All chats cleared', 'success');
-            } catch (error) {
-                console.error('Failed to clear history:', error);
-                showToast('Failed to clear history', 'error');
-            }
+    const handleClearClick = () => {
+        setClearModalOpen(true);
+    };
+
+    const confirmClearHistory = async () => {
+        try {
+            await fetch('/api/history/clear', { method: 'DELETE' });
+            fetchSessions();
+            onReset();
+            showToast('All chats cleared', 'success');
+        } catch {
+            showToast('Failed to clear history', 'error');
+        } finally {
+            setClearModalOpen(false);
         }
     };
 
@@ -154,182 +174,256 @@ export function Sidebar({
     }, [uploadLogs]);
 
     return (
-        <div className="w-80 glass-panel flex flex-col h-screen z-50 texture-noise">
+        <motion.div
+            className="glass-panel flex flex-col h-screen z-50 texture-noise border-r border-white/[0.08]"
+            animate={{ width: isCollapsed ? 72 : 320 }}
+            initial={false}
+            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+        >
             {/* Header with Logo */}
-            <div className="p-5 flex items-center justify-between">
+            <div className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl overflow-hidden shadow-glow-accent flex items-center justify-center bg-gradient-to-br from-rose-500/20 to-amber-500/20 border border-white/10">
-                        <Image
-                            src="/logo.png"
-                            alt="OpenRAG"
-                            width={28}
-                            height={28}
-                            className="object-contain"
-                        />
+                    <div className="w-10 h-10 rounded-2xl overflow-hidden flex items-center justify-center">
+                        <Image src="/logo.png" alt="OpenRAG" width={80} height={80} className="object-cover" />
                     </div>
-                    <h2 className="text-lg font-bold text-gradient">OpenRAG</h2>
-                </div>
-                <div className="flex gap-1.5">
-                    <TextureButton
-                        onClick={onReset}
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 rounded-xl"
-                        title="New Chat"
-                        disabled={isLoadingSession}
-                    >
-                        <PlusCircle className="h-4 w-4" />
-                    </TextureButton>
-                    <SettingsDialog />
-                </div>
-            </div>
-
-            <TextureSeparator />
-
-            <ScrollArea className="flex-1">
-                <div className="p-4 space-y-5">
-                    {/* Files Section */}
-                    <div className="glass-card rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                                Knowledge Base
-                            </h3>
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={onUpload}
-                                className="hidden"
-                                multiple
-                                accept=".txt,.md,.pdf,.json"
-                            />
-                            <TextureButton
-                                onClick={triggerFileUpload}
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
+                    <AnimatePresence mode="wait">
+                        {!isCollapsed && (
+                            <motion.h2
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -10 }}
+                                transition={{ duration: 0.2 }}
+                                className="text-lg font-bold text-gradient whitespace-nowrap"
                             >
-                                <Upload className="h-3 w-3 mr-1.5" />
-                                Add
-                            </TextureButton>
-                        </div>
-
-                        {vaultCount > 0 && (
-                            <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-rose-500/10 to-amber-500/10 border border-white/[0.06] flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-rose-500/30 to-amber-500/30 flex items-center justify-center border border-white/10">
-                                    <span className="text-gradient text-xs font-bold">SB</span>
-                                </div>
-                                <div>
-                                    <div className="text-xs font-medium text-neutral-200">Second Brain Active</div>
-                                    <div className="text-[10px] text-neutral-500">{vaultCount} items indexed</div>
-                                </div>
-                            </div>
+                                OpenRAG
+                            </motion.h2>
                         )}
-
-                        <div className="space-y-1">
-                            {files.length === 0 ? (
-                                <div className="text-center py-6 border border-dashed border-white/[0.08] rounded-lg bg-white/[0.02]">
-                                    <File className="h-7 w-7 text-neutral-600 mx-auto mb-2" />
-                                    <p className="text-xs text-neutral-500">No files uploaded</p>
-                                </div>
-                            ) : (
-                                files.map((file) => (
-                                    <div
-                                        key={file}
-                                        className="group flex items-center justify-between p-2.5 rounded-lg hover:bg-white/[0.04] transition-all duration-200 border border-transparent hover:border-white/[0.06]"
-                                    >
-                                        <div className="flex items-center overflow-hidden">
-                                            <File className="h-4 w-4 text-rose-400 mr-2.5 flex-shrink-0" />
-                                            <span className="text-sm text-neutral-300 truncate" title={file}>
-                                                {file}
-                                            </span>
-                                        </div>
-                                        <TextureButton
-                                            onClick={() => onDelete(file)}
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-6 w-6 opacity-0 group-hover:opacity-100 text-neutral-500 hover:text-red-400 transition-all"
-                                        >
-                                            <Trash2 className="h-3 w-3" />
-                                        </TextureButton>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Upload Logs Section */}
-                    {renderUploadProgress()}
-
-                    {/* History Section */}
-                    <div className="glass-card rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                                History
-                            </h3>
-                            {sessions.length > 0 && (
-                                <TextureButton
-                                    onClick={clearHistory}
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-[10px] text-neutral-500 hover:text-red-400"
-                                >
-                                    Clear
-                                </TextureButton>
-                            )}
-                        </div>
-
-                        {loadingSessions ? (
-                            <div className="flex items-center justify-center py-6">
-                                <Loader2 className="w-5 h-5 animate-spin text-neutral-500" />
-                            </div>
-                        ) : sessions.length === 0 ? (
-                            <div className="text-center py-6 text-xs text-neutral-500">
-                                No chat history yet
-                            </div>
-                        ) : (
-                            <div className="space-y-1">
-                                {sessions.map((session) => (
-                                    <div
-                                        key={session.id}
-                                        onClick={() => !isLoadingSession && onSelectSession(session.id)}
-                                        className={`group flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all duration-200 ${currentSessionId === session.id
-                                            ? 'bg-gradient-to-r from-rose-500/15 to-amber-500/10 border border-rose-500/20'
-                                            : 'hover:bg-white/[0.04] border border-transparent hover:border-white/[0.06]'
-                                            } ${isLoadingSession ? 'opacity-50 cursor-wait' : ''}`}
-                                    >
-                                        <div className="flex items-center overflow-hidden">
-                                            {isLoadingSession && currentSessionId === session.id ? (
-                                                <Loader2 className="mr-2.5 h-4 w-4 flex-shrink-0 animate-spin text-rose-400" />
-                                            ) : (
-                                                <MessageSquare className={`mr-2.5 h-4 w-4 flex-shrink-0 ${currentSessionId === session.id ? 'text-rose-400' : 'text-neutral-500'
-                                                    }`} />
-                                            )}
-                                            <span className={`text-sm truncate ${currentSessionId === session.id ? 'text-neutral-100' : 'text-neutral-300'
-                                                }`} title={session.title}>
-                                                {session.title}
-                                            </span>
-                                        </div>
-                                        <TextureButton
-                                            onClick={(e) => deleteSession(e, session.id)}
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-6 w-6 opacity-0 group-hover:opacity-100 text-neutral-500 hover:text-red-400 transition-all"
-                                            disabled={isLoadingSession}
-                                        >
-                                            <Trash2 className="h-3 w-3" />
-                                        </TextureButton>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    </AnimatePresence>
                 </div>
-            </ScrollArea>
+                <AnimatePresence mode="wait">
+                    {!isCollapsed && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="flex gap-1.5"
+                        >
+                            <SettingsDialog />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* New Chat Button */}
+            <div className={`px-4 pb-3 ${isCollapsed ? 'px-3' : ''}`}>
+                <TextureButton
+                    onClick={onReset}
+                    variant="accent"
+                    className={`w-full ${isCollapsed ? 'h-10 w-10 px-0' : ''} rounded-xl`}
+                    disabled={isLoadingSession}
+                    title="New Chat"
+                >
+                    <PlusCircle className={`h-4 w-4 ${isCollapsed ? '' : 'mr-2'}`} />
+                    {!isCollapsed && <span>New Chat</span>}
+                </TextureButton>
+            </div>
 
             <TextureSeparator />
-            <div className="p-4 text-xs text-center text-neutral-600">
-                Powered by Ollama & OpenRAG
-            </div>
-        </div>
+
+            <AnimatePresence mode="wait">
+                {!isCollapsed && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex-1 overflow-hidden flex flex-col"
+                    >
+                        <ScrollArea className="flex-1">
+                            <div className="p-4 space-y-5">
+                                {/* Files Section */}
+                                <div className="glass-card rounded-xl p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                                            Knowledge Base
+                                        </h3>
+                                        <input
+                                            type="file"
+                                            ref={fileInputRef}
+                                            onChange={onUpload}
+                                            className="hidden"
+                                            multiple
+                                            accept=".txt,.md,.pdf,.json"
+                                        />
+                                        <TextureButton
+                                            onClick={triggerFileUpload}
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs"
+                                        >
+                                            <Upload className="h-3 w-3 mr-1.5" />
+                                            Add
+                                        </TextureButton>
+                                    </div>
+
+                                    {vaultCount > 0 && (
+                                        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-rose-500/10 to-amber-500/10 border border-white/[0.06] flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-lg bg-rose-500/20 flex items-center justify-center text-rose-400">
+                                                <span className="text-xs font-bold">SB</span>
+                                            </div>
+                                            <div>
+                                                <div className="text-xs font-bold text-white">Knowledge Base Active</div>
+                                                <div className="text-[10px] text-rose-200/60">{vaultCount} items indexed</div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-2">
+                                        {files.length === 0 ? (
+                                            <div className="text-center py-8 border-2 border-dashed border-white/5 rounded-xl bg-white/[0.02]">
+                                                <File className="mx-auto h-8 w-8 text-neutral-600 mb-2 opacity-50" />
+                                                <p className="text-xs text-neutral-500">No files uploaded</p>
+                                            </div>
+                                        ) : (
+                                            files.map((file, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="group flex items-center justify-between p-2.5 rounded-lg hover:bg-white/[0.04] border border-transparent hover:border-white/[0.04] transition-all"
+                                                >
+                                                    <div className="flex items-center space-x-2.5 overflow-hidden">
+                                                        <div className="p-1.5 rounded-md bg-indigo-500/10 text-indigo-400">
+                                                            <File className="h-3.5 w-3.5" />
+                                                        </div>
+                                                        <span className="text-sm text-neutral-300 truncate max-w-[140px] group-hover:text-neutral-100 transition-colors">
+                                                            {file}
+                                                        </span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => onDelete(file)}
+                                                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 hover:text-red-400 rounded-md transition-all"
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    {/* Upload Progress */}
+                                    {renderUploadProgress()}
+                                </div>
+
+                                {/* History Section */}
+                                <div className="glass-card rounded-xl p-4">
+                                    <h3 className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-3">
+                                        History
+                                    </h3>
+                                    <div className="space-y-1">
+                                        {loadingSessions ? (
+                                            <div className="flex justify-center py-4">
+                                                <Loader2 className="h-4 w-4 animate-spin text-neutral-500" />
+                                            </div>
+                                        ) : sessions.length === 0 ? (
+                                            <div className="text-center py-6">
+                                                <p className="text-xs text-neutral-600">No chat history yet</p>
+                                            </div>
+                                        ) : (
+                                            sessions.map((session) => (
+                                                <div
+                                                    key={session.id}
+                                                    className={`group flex items-center justify-between p-2 rounded-lg transition-all border ${currentSessionId === session.id
+                                                        ? 'bg-white/[0.06] border-white/10 text-white shadow-sm'
+                                                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04] border-transparent'
+                                                        }`}
+                                                >
+                                                    <button
+                                                        className="flex items-center space-x-3 flex-1 overflow-hidden text-left"
+                                                        onClick={() => onSelectSession(session.id)}
+                                                    >
+                                                        <MessageSquare className={`h-3.5 w-3.5 flex-shrink-0 ${currentSessionId === session.id ? 'text-amber-400' : 'text-neutral-600 group-hover:text-neutral-400'
+                                                            }`} />
+                                                        <span className="text-sm truncate">
+                                                            {session.title || 'New Chat'}
+                                                        </span>
+                                                    </button>
+                                                    <button
+                                                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 hover:text-red-400 rounded transition-all"
+                                                        onClick={(e) => handleDeleteClick(e, session.id)}
+                                                    >
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                    {sessions.length > 0 && (
+                                        <TextureButton
+                                            className="w-full mt-3 text-xs h-7"
+                                            variant="ghost"
+                                            onClick={handleClearClick}
+                                        >
+                                            Clear All
+                                        </TextureButton>
+                                    )}
+                                </div>
+                            </div>
+                        </ScrollArea>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Footer with toggle */}
+            {isCollapsed ? (
+                <div className="p-3 mt-auto flex justify-center border-t border-white/[0.08]">
+                    <TextureButton
+                        onClick={onToggleCollapse}
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Expand Sidebar"
+                        className="rounded-lg text-neutral-500 hover:text-neutral-200"
+                    >
+                        <PanelLeft className="h-4 w-4" />
+                    </TextureButton>
+                </div>
+            ) : (
+                <div className="mt-auto">
+                    <TextureSeparator />
+                    <div className="p-4 flex items-center justify-between">
+                        <span className="text-xs text-neutral-600">
+                            Powered by Ollama & OpenRAG
+                        </span>
+                        <TextureButton
+                            onClick={onToggleCollapse}
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Collapse Sidebar"
+                            className="rounded-lg text-neutral-500 hover:text-neutral-200"
+                        >
+                            <PanelLeftClose className="h-4 w-4" />
+                        </TextureButton>
+                    </div>
+                </div>
+            )}
+
+            {/* Confirm Modals */}
+            <ConfirmModal
+                open={deleteModalOpen}
+                onConfirm={confirmDeleteSession}
+                onCancel={() => { setDeleteModalOpen(false); setPendingDeleteId(null); }}
+                title="Delete Chat"
+                description="Are you sure you want to delete this chat? This action cannot be undone."
+                confirmText="Delete"
+                variant="danger"
+            />
+            <ConfirmModal
+                open={clearModalOpen}
+                onConfirm={confirmClearHistory}
+                onCancel={() => setClearModalOpen(false)}
+                title="Clear All History"
+                description="Are you sure you want to clear ALL chat history? This action cannot be undone."
+                confirmText="Clear All"
+                variant="danger"
+            />
+        </motion.div>
     );
 }

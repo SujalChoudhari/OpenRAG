@@ -2,9 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TextureButton } from "@/components/ui/texture-button";
 import { Message } from 'ai';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Send, Bot, User, Brain, ChevronDown, ChevronRight, Sparkles, BookOpen, Database, AlertCircle } from 'lucide-react';
+import { Send, Bot, User, Brain, ChevronDown, ChevronRight, Sparkles, BookOpen, Database, AlertCircle, PanelLeft, CheckCircle2, FileText, Search, Loader2 } from 'lucide-react';
 import Markdown from "react-markdown";
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
@@ -34,6 +35,10 @@ interface ChatAreaProps {
     files?: string[];
     personaSelector?: React.ReactNode;
     selectedPersona?: SelectedPersona | null;
+    sidebarCollapsed?: boolean;
+    onToggleSidebar?: () => void;
+    streamingThinking?: string;
+    setInput?: (value: string) => void;
 }
 
 interface ParsedResponse {
@@ -158,11 +163,52 @@ export function ChatArea({
     data,
     files = [],
     personaSelector,
-    selectedPersona
+    selectedPersona,
+    sidebarCollapsed = false,
+    onToggleSidebar,
+    streamingThinking = '',
+    setInput
 }: ChatAreaProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
     const [selectedSource, setSelectedSource] = useState<{ title: string; content: string } | null>(null);
+    const [thinkingCollapsed, setThinkingCollapsed] = useState(false);
+
+    // Detect when thinking is done from server signal
+    const thinkingDone = useMemo(() => {
+        if (!data || data.length === 0) return false;
+        return data.some((item: any) => item?.thinkingDone === true);
+    }, [data]);
+
+    // Auto-collapse thinking when done
+    useEffect(() => {
+        if (thinkingDone && !thinkingCollapsed) {
+            setThinkingCollapsed(true);
+        }
+    }, [thinkingDone, thinkingCollapsed]);
+
+    // Reset thinking state when new message starts
+    useEffect(() => {
+        if (isTyping && streamingThinking === '') {
+            setThinkingCollapsed(false);
+        }
+    }, [isTyping, streamingThinking]);
+
+    // Debug: Log streamingThinking changes
+    useEffect(() => {
+        if (streamingThinking) {
+            console.log('🧠 ChatArea streamingThinking:', streamingThinking.slice(-50));
+        }
+    }, [streamingThinking]);
+
+    // Extract RAG status from streaming data
+    const ragStatus = useMemo(() => {
+        if (!data || data.length === 0) return null;
+        // Last item might be the status object or partial data
+        // We look for the status object specifically
+        const statusItem = data.find((item: any) => item?.ragStatus) as any;
+        return statusItem?.ragStatus || null;
+    }, [data]);
 
     // Autocomplete state
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -178,12 +224,11 @@ export function ChatArea({
         return files.filter(f => f.toLowerCase().includes(debouncedQuery.toLowerCase()));
     }, [files, debouncedQuery]);
 
-    // Extract sources and ragStatus from data stream - memoized
-    const { sources, ragStatus } = useMemo(() => {
-        const sourceData = data?.find(d => d && (d as { sources?: SourceData[] }).sources) as { sources: SourceData[], ragStatus?: { searched: boolean, found: number, error: string | null } } | undefined;
+    // Extract sources from data stream - memoized
+    const { sources } = useMemo(() => {
+        const sourceData = data?.find(d => d && (d as { sources?: SourceData[] }).sources) as { sources: SourceData[] } | undefined;
         return {
-            sources: sourceData?.sources || [],
-            ragStatus: sourceData?.ragStatus || null
+            sources: sourceData?.sources || []
         };
     }, [data]);
 
@@ -246,11 +291,16 @@ export function ChatArea({
             const newValue = value.slice(0, lastAt) + `@${fileName} ` + value.slice(cursorPosition);
             const newCursorPos = lastAt + fileName.length + 2;
 
-            // Use native setter for controlled input
-            const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-            if (nativeInputSetter) {
-                nativeInputSetter.call(inputRef.current, newValue);
-                inputRef.current.dispatchEvent(new Event('input', { bubbles: true }));
+            // Use setInput if available (React-friendly), fallback to synthetic event
+            if (setInput) {
+                setInput(newValue);
+            } else {
+                // Create a synthetic event for controlled input
+                const syntheticEvent = {
+                    target: { value: newValue },
+                    currentTarget: { value: newValue }
+                } as React.ChangeEvent<HTMLInputElement>;
+                handleInputChange(syntheticEvent);
             }
 
             setShowSuggestions(false);
@@ -260,21 +310,30 @@ export function ChatArea({
                 inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
             });
         }
-    }, [input]);
+    }, [input, setInput, handleInputChange]);
 
     const handleQuestionClick = useCallback((question: string) => {
-        const inputElement = document.querySelector('input[name="chat-input"]') as HTMLInputElement;
-        const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-
-        if (inputElement && nativeInputSetter) {
-            nativeInputSetter.call(inputElement, question);
-            inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+        // Use setInput if available (React-friendly approach)
+        if (setInput) {
+            setInput(question);
+            // Submit after state update
             setTimeout(() => {
-                const form = inputElement.closest('form');
+                const form = document.querySelector('form');
+                form?.requestSubmit();
+            }, 100);
+        } else {
+            // Fallback: create synthetic event
+            const syntheticEvent = {
+                target: { value: question },
+                currentTarget: { value: question }
+            } as React.ChangeEvent<HTMLInputElement>;
+            handleInputChange(syntheticEvent);
+            setTimeout(() => {
+                const form = document.querySelector('form');
                 form?.requestSubmit();
             }, 100);
         }
-    }, []);
+    }, [setInput, handleInputChange]);
 
     // Memoized citation renderer
     const renderAnswerWithCitations = useCallback((text: string, messageSources: SourceData[]) => {
@@ -341,16 +400,16 @@ export function ChatArea({
                         </div>
 
                         <div className="flex flex-col space-y-2 w-full">
-                            {/* Sources Section (Collapsible) */}
+                            {/* Sources Section (Card Style) */}
                             {!isUser && messageSources && messageSources.length > 0 && (
-                                <div className="glass-card rounded-xl overflow-hidden mb-2">
+                                <div className="mb-2">
                                     <button
                                         onClick={() => toggleThought(`sources-${message.id}`)}
-                                        className="w-full flex items-center px-3 py-2.5 text-xs text-amber-500/80 hover:text-amber-500 hover:bg-white/[0.03] transition-colors"
+                                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-full transition-colors w-fit transition-all"
                                     >
-                                        <BookOpen className="w-3 h-3 mr-2" />
-                                        <span>Sources Used ({messageSources.length})</span>
-                                        {expandedThoughts[`sources-${message.id}`] ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
+                                        <BookOpen className="w-3 h-3" />
+                                        <span>{messageSources.length} Sources Found</span>
+                                        {expandedThoughts[`sources-${message.id}`] ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                                     </button>
                                     <AnimatePresence>
                                         {expandedThoughts[`sources-${message.id}`] && (
@@ -358,22 +417,33 @@ export function ChatArea({
                                                 initial={{ height: 0, opacity: 0 }}
                                                 animate={{ height: 'auto', opacity: 1 }}
                                                 exit={{ height: 0, opacity: 0 }}
-                                                className="px-3 pb-3 space-y-2"
+                                                className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2"
                                             >
-                                                <div className="text-xs text-gray-500 font-mono border-t border-white/5 pt-2">
-                                                    {messageSources.map((source, idx) => (
-                                                        <div key={idx} className="mb-2 last:mb-0">
-                                                            <div className="font-semibold text-gray-400 mb-1">Source {idx + 1}</div>
-                                                            <div className="line-clamp-2">{source.text}</div>
-                                                            <button
-                                                                onClick={() => setSelectedSource({ title: `Source ${idx + 1}`, content: source.text })}
-                                                                className="text-rose-500 hover:underline mt-1"
-                                                            >
-                                                                View Full
-                                                            </button>
+                                                {messageSources.map((source, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        className="glass-card p-3 rounded-xl border border-white/5 hover:border-amber-500/30 transition-colors cursor-pointer group"
+                                                        onClick={() => setSelectedSource({ title: `Source ${idx + 1}`, content: source.text })}
+                                                    >
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <div className="flex items-center gap-1.5 text-amber-500">
+                                                                <FileText className="w-3 h-3" />
+                                                                <span className="text-xs font-bold">Source {idx + 1}</span>
+                                                            </div>
+                                                            {source.similarity && (
+                                                                <span className="text-[10px] text-neutral-500 bg-white/5 px-1.5 py-0.5 rounded">
+                                                                    {Math.round(source.similarity * 100)}% Match
+                                                                </span>
+                                                            )}
                                                         </div>
-                                                    ))}
-                                                </div>
+                                                        <p className="text-xs text-neutral-400 line-clamp-2 leading-relaxed">
+                                                            {source.text}
+                                                        </p>
+                                                        <div className="flex justify-end mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <span className="text-[10px] text-rose-400 hover:text-rose-300">View Full</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </motion.div>
                                         )}
                                     </AnimatePresence>
@@ -381,54 +451,63 @@ export function ChatArea({
                             )}
 
                             {thought && (
-                                <div className="glass-card rounded-xl overflow-hidden">
-                                    <button
-                                        onClick={() => toggleThought(message.id)}
-                                        className="w-full flex items-center px-3 py-2.5 text-xs text-neutral-400 hover:text-neutral-300 hover:bg-white/[0.03] transition-colors"
-                                    >
-                                        <Brain className="w-3 h-3 mr-2" />
-                                        <span>Thinking Process</span>
-                                        {expandedThoughts[message.id] ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
-                                    </button>
-                                    <AnimatePresence>
-                                        {expandedThoughts[message.id] && (
-                                            <motion.div
-                                                initial={{ height: 0, opacity: 0 }}
-                                                animate={{ height: 'auto', opacity: 1 }}
-                                                exit={{ height: 0, opacity: 0 }}
-                                                className="px-3 pb-3"
-                                            >
-                                                <div className="text-xs text-gray-500 font-mono border-t border-white/5 pt-2">
-                                                    {thought}
-                                                </div>
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
+                                <div className="mb-2 w-full max-w-full">
+                                    {(expandedThoughts[message.id] || (isTyping && index === messages.length - 1 && !answer)) ? (
+                                        <div className="glass-panel bg-black/40 border border-rose-500/10 rounded-2xl rounded-tl-none p-4 relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                            <div className="flex items-center gap-2 text-rose-400/70 mb-2 select-none">
+                                                <Brain className={`w-3 h-3 ${isTyping && index === messages.length - 1 && !answer ? 'animate-pulse' : ''}`} />
+                                                <span className="text-[10px] font-bold uppercase tracking-wider">Thinking Process</span>
+                                                <button
+                                                    onClick={() => toggleThought(message.id)}
+                                                    className="ml-auto hover:bg-white/10 p-1 rounded transition-colors"
+                                                >
+                                                    <ChevronDown className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                            <div className="font-mono text-xs text-gray-400 whitespace-pre-wrap leading-relaxed opacity-90">
+                                                {thought}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            onClick={() => toggleThought(message.id)}
+                                            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-rose-500/70 hover:text-rose-400 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 rounded-full transition-all w-fit mb-2"
+                                        >
+                                            <Brain className="w-3 h-3" />
+                                            <span>Show Thinking Process</span>
+                                            <ChevronRight className="w-3 h-3" />
+                                        </button>
+                                    )}
                                 </div>
                             )}
 
-                            <div
-                                className={`p-4 rounded-2xl shadow-lg backdrop-blur-sm border ${isUser
-                                    ? 'bg-gradient-to-br from-rose-600/15 to-amber-600/10 border-rose-500/20 text-neutral-100 rounded-tr-none'
-                                    : 'glass-card text-neutral-100 rounded-tl-none'
-                                    }`}
-                            >
-                                {isUser ? (
-                                    <Markdown
-                                        className="prose prose-invert prose-sm max-w-none"
-                                        components={{
-                                            pre: ({ children }) => <div className="overflow-auto w-full my-2 bg-black/30 p-2 rounded">{children}</div>,
-                                            code: ({ children, className }) => <code className={`bg-black/30 px-1 py-0.5 rounded text-sm ${className || ''}`}>{children}</code>
-                                        }}
-                                    >
-                                        {answer}
-                                    </Markdown>
-                                ) : (
-                                    <div>
-                                        {renderAnswerWithCitations(answer, messageSources || [])}
-                                    </div>
-                                )}
-                            </div>
+                            {(answer || (!thought && !isTyping) || (!thought && isTyping)) && (
+                                <div
+                                    className={`p-4 rounded-2xl shadow-lg backdrop-blur-sm border ${isUser
+                                        ? 'bg-gradient-to-br from-rose-600/15 to-amber-600/10 border-rose-500/20 text-neutral-100 rounded-tr-none'
+                                        : 'glass-card text-neutral-100 rounded-tl-none ring-1 ring-white/5'
+                                        }`}
+                                >
+                                    {isUser ? (
+                                        <Markdown
+                                            className="prose prose-invert prose-sm max-w-none"
+                                            components={{
+                                                pre: ({ children }) => <div className="overflow-auto w-full my-2 bg-black/30 p-2 rounded">{children}</div>,
+                                                code: ({ children, className }) => <code className={`bg-black/30 px-1 py-0.5 rounded text-sm ${className || ''}`}>{children}</code>
+                                            }}
+                                        >
+                                            {answer}
+                                        </Markdown>
+                                    ) : (
+                                        <div>
+                                            {renderAnswerWithCitations(answer, messageSources || [])}
+                                            {isTyping && index === messages.length - 1 && !answer && (
+                                                <span className="inline-block w-1.5 h-4 bg-rose-500/50 align-middle animate-pulse ml-1" />
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             {questions && questions.length > 0 && (
                                 <div className="flex flex-wrap gap-2 mt-3">
@@ -463,6 +542,17 @@ export function ChatArea({
             {personaSelector && (
                 <div className="flex items-center justify-between px-6 py-3 border-b border-white/[0.05] bg-black/60 backdrop-blur-xl z-20">
                     <div className="flex items-center gap-3">
+                        {sidebarCollapsed && (
+                            <TextureButton
+                                onClick={onToggleSidebar}
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-lg mr-1 text-neutral-400 hover:text-white"
+                                title="Expand Sidebar"
+                            >
+                                <PanelLeft className="h-4 w-4" />
+                            </TextureButton>
+                        )}
                         {selectedPersona && (
                             <>
                                 <span className="text-xl">{selectedPersona.avatar || '🤖'}</span>
@@ -498,7 +588,57 @@ export function ChatArea({
                     {renderedMessages}
                 </AnimatePresence>
 
-                {isTyping && (
+                {/* Streaming Thinking Bubble - shows when AI is thinking in real-time */}
+                {streamingThinking && !thinkingCollapsed && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex justify-start"
+                    >
+                        <div className="flex items-start space-x-3">
+                            <div className="w-8 h-8 rounded-full bg-neutral-800/80 flex items-center justify-center border border-white/[0.06]">
+                                <Brain className="w-5 h-5 text-rose-400 animate-pulse" />
+                            </div>
+                            <div className="glass-panel bg-black/40 border border-rose-500/10 rounded-2xl rounded-tl-none p-4 max-w-[85%] relative overflow-hidden">
+                                <div className="flex items-center gap-2 text-rose-400/70 mb-2 select-none">
+                                    <Brain className="w-3 h-3 animate-pulse" />
+                                    <span className="text-[10px] font-bold uppercase tracking-wider">Thinking...</span>
+                                    <button
+                                        onClick={() => setThinkingCollapsed(true)}
+                                        className="ml-auto hover:bg-white/10 p-1 rounded transition-colors"
+                                    >
+                                        <ChevronDown className="w-3 h-3" />
+                                    </button>
+                                </div>
+                                <div className="font-mono text-xs text-gray-400 whitespace-pre-wrap leading-relaxed opacity-90 max-h-48 overflow-y-auto">
+                                    {streamingThinking}
+                                    <span className="inline-block w-1.5 h-4 bg-rose-500/50 align-middle animate-pulse ml-1" />
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+
+                {/* Collapsed thinking indicator */}
+                {streamingThinking && thinkingCollapsed && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex justify-start"
+                    >
+                        <button
+                            onClick={() => setThinkingCollapsed(false)}
+                            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-rose-500/70 hover:text-rose-400 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 rounded-full transition-all ml-11"
+                        >
+                            <Brain className="w-3 h-3 animate-pulse" />
+                            <span>Thinking... (click to expand)</span>
+                            <ChevronRight className="w-3 h-3" />
+                        </button>
+                    </motion.div>
+                )}
+
+                {/* Only show typing indicator if there's no assistant message streaming content yet */}
+                {isTyping && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -561,7 +701,54 @@ export function ChatArea({
                     )}
                 </AnimatePresence>
 
-                <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
+                <AnimatePresence>
+                    {(ragStatus || isTyping) && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="absolute -top-12 left-0 right-0 flex justify-center pointer-events-none z-0"
+                        >
+                            <div className="bg-[#0a0a0a]/90 backdrop-blur border border-white/10 shadow-glow px-4 py-1.5 rounded-full flex items-center gap-3 text-xs">
+                                {ragStatus?.searched ? (
+                                    <>
+                                        {ragStatus.found > 0 ? (
+                                            <span className="text-emerald-400 flex items-center gap-1.5">
+                                                <CheckCircle2 className="w-3 h-3" />
+                                                Found {ragStatus.found} sources
+                                            </span>
+                                        ) : (
+                                            <span className="text-amber-400 flex items-center gap-1.5">
+                                                <AlertCircle className="w-3 h-3" />
+                                                No relevant sources found
+                                            </span>
+                                        )}
+                                        <span className="w-px h-3 bg-white/10" />
+                                    </>
+                                ) : (ragStatus && !ragStatus.searched) ? (
+                                    <>
+                                        <span className="text-rose-400 flex items-center gap-1.5">
+                                            <Search className="w-3 h-3 animate-pulse" />
+                                            Searching knowledge base...
+                                        </span>
+                                        <span className="w-px h-3 bg-white/10" />
+                                    </>
+                                ) : null}
+
+                                {isTyping ? (
+                                    <span className="text-neutral-300 flex items-center gap-1.5">
+                                        <Loader2 className="w-3 h-3 animate-spin text-rose-500" />
+                                        Generating response...
+                                    </span>
+                                ) : (
+                                    <span className="text-neutral-500">Ready</span>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group z-10">
                     <Input
                         ref={inputRef}
                         name="chat-input"

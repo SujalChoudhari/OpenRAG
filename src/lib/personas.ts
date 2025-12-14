@@ -296,7 +296,7 @@ export function setDefaultPersona(id: string): void {
 }
 
 /**
- * Create the default "Second Brain Analyst" persona
+ * Create the default "Knowledge Analyst" persona
  */
 export function createDefaultPersonas(): void {
     const existing = getAllPersonas();
@@ -305,7 +305,7 @@ export function createDefaultPersonas(): void {
     // Default RAG Assistant
     createPersona({
         id: 'default_analyst',
-        name: 'Second Brain Analyst',
+        name: 'Knowledge Analyst',
         avatar: '🧠',
         role: 'Personal knowledge analyst and assistant',
         description: 'I help you understand, synthesize, and recall information from your personal knowledge base. I analyze your notes, find connections, and answer questions based on your collected knowledge.',

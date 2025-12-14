@@ -275,13 +275,4 @@ export class DocumentProcessor {
 
         return docs;
     }
-
-    // This method seems unused in the original code but kept for compatibility/utility
-    getDocumentSnippet(docName: string, maxLength = 200) {
-        const doc = this.documents.find(d => d.name === docName);
-        if (doc) {
-            return doc.content.slice(0, maxLength) + '...';
-        }
-        return '';
-    }
 }

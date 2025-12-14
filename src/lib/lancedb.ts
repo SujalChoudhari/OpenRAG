@@ -70,20 +70,15 @@ export async function getTable(tableName: string = 'vectors', vectorDim?: number
 }
 
 export async function resetTable(tableName: string = 'vectors'): Promise<void> {
-    console.log(`🗑️ Dropping table '${tableName}'...`);
     const db = await getLanceDb();
     const tableNames = await db.tableNames();
     if (tableNames.includes(tableName)) {
         await db.dropTable(tableName);
-        console.log(`   ✅ Table '${tableName}' dropped successfully`);
-    } else {
-        console.log(`   ⚠️ Table '${tableName}' does not exist, nothing to drop`);
     }
     // Reset ALL cached state to force fresh recreation
     dbInstance = null;
     connectPromise = null;
     currentVectorDim = null; // CRITICAL: Reset dimension so next embedding sets it fresh
-    console.log(`   🔄 Reset all cached state`);
 }
 
 // Batch insert records for better performance

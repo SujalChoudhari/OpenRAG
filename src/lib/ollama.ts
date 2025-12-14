@@ -13,11 +13,11 @@ export async function generateSummary(prompt: string): Promise<string> {
     const ollama = getOllama();
     try {
         const response = await ollama.generate({
-            model: settings.summarizationModel || settings.chatModel,
+            model: settings.chatModel,
             prompt: prompt,
             options: {
-                temperature: settings.summaryTemperature,
-                num_predict: settings.maxSummaryLength,
+                temperature: 0.3,
+                num_predict: 100,
             }
         });
         return response.response;
