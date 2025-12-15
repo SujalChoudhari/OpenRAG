@@ -1,5 +1,5 @@
 import { getOllama } from './ollama';
-import { getTable, resetTable, batchInsert, safeDelete, setVectorDimension } from './lancedb';
+import { getTable, resetTable, batchInsert, safeDelete, setVectorDimension, withRetry } from './lancedb';
 import { CONFIG } from './config';
 import { getSettings } from './settings';
 
@@ -28,13 +28,24 @@ interface SearchResultItem {
 
 let dimensionInitialized = false;
 
+/**
+ * Create embedding with automatic retry for transient failures
+ * Retries on connection issues but not on model errors
+ */
 export async function createEmbedding(text: string): Promise<EmbeddingResponse> {
-    try {
+    return withRetry(async () => {
         const settings = getSettings();
         const ollama = getOllama();
+
+        // Truncate very long text to prevent memory issues
+        const maxChars = 8000; // ~2000 tokens
+        const truncatedText = text.length > maxChars
+            ? text.substring(0, maxChars) + '...[truncated]'
+            : text;
+
         const response = await ollama.embed({
             model: settings.embeddingModel,
-            input: text
+            input: truncatedText
         });
 
         // Set vector dimension based on actual model output (first time only)
@@ -42,13 +53,22 @@ export async function createEmbedding(text: string): Promise<EmbeddingResponse> 
             const dim = response.embeddings[0].length;
             setVectorDimension(dim);
             dimensionInitialized = true;
+            console.log(`[VectorStore] Initialized embedding dimension: ${dim}`);
         }
 
         return response;
-    } catch (error) {
-        console.error('Error creating embedding:', error);
+    }, 2, 1000).catch(error => {
+        // Enhance error message for common issues
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('fetch failed')) {
+            throw new Error(`Cannot connect to Ollama. Please ensure Ollama is running. Original: ${errorMsg}`);
+        }
+        if (errorMsg.includes('model')) {
+            throw new Error(`Embedding model error. Please check your model settings. Original: ${errorMsg}`);
+        }
+        console.error('[VectorStore] Error creating embedding:', error);
         throw error;
-    }
+    });
 }
 
 export async function clearDatabase(): Promise<void> {

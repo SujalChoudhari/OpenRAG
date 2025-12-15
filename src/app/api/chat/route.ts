@@ -1,5 +1,5 @@
 import { createSession, getSession, saveSession, ChatSession } from '@/lib/chat-history';
-import { systemPrompt } from '@/lib/prompts';
+import { systemPrompt, titlePrompt } from '@/lib/prompts';
 import { hierarchicalSearch } from '@/lib/vector-store';
 import { getSettings } from '@/lib/settings';
 import { StreamData } from 'ai';
@@ -7,12 +7,33 @@ import { Ollama } from 'ollama'; // Use native client directly
 import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '@/lib/config';
+import { z } from 'zod';
 
 // Allow streaming responses up to 5 minutes
 export const maxDuration = 300;
 
 // Timeout for title generation (10 seconds)
 const TITLE_GENERATION_TIMEOUT = 30000;
+
+// Request validation schema - permissive to allow extra fields from frontend
+const MessageSchema = z.object({
+    id: z.string().optional(),
+    role: z.enum(['user', 'assistant', 'system']),
+    content: z.string().max(100000, 'Message content too long (max 100K characters)')
+}).passthrough(); // Allow additional fields like createdAt, annotations, etc.
+
+const ChatRequestSchema = z.object({
+    messages: z.array(MessageSchema)
+        .min(1, 'At least one message is required')
+        .max(200, 'Too many messages in conversation (max 200)'),
+    sessionId: z.string().nullable().optional(),
+    personaId: z.string().nullable().optional(),
+    personaPrompt: z.string().max(10000).nullable().optional(),
+    skipRag: z.boolean().nullable().optional(),
+    model: z.string().nullable().optional()
+}).passthrough(); // Allow additional fields
+
+type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
 interface Source {
     [key: string]: string | number;
@@ -49,10 +70,9 @@ ${content}
 `;
 }
 
-async function generateTitle(aiResponse: string, settings: ReturnType<typeof getSettings>): Promise<string> {
+async function generateTitle(userMessage: string, settings: ReturnType<typeof getSettings>): Promise<string> {
     try {
         const ollama = new Ollama({ host: settings.ollamaHost });
-        const responsePreview = aiResponse.substring(0, 300);
 
         // Create a promise that rejects after timeout
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -62,7 +82,7 @@ async function generateTitle(aiResponse: string, settings: ReturnType<typeof get
         const generatePromise = ollama.chat({
             model: settings.chatModel,
             messages: [
-                { role: 'user', content: `Generate a very short, concise title (max 4 words) for a chat based on this AI response: "${responsePreview}". Do not use quotes. Just the title, nothing else.` }
+                { role: 'user', content: titlePrompt(userMessage) }
             ],
             stream: false
         });
@@ -70,7 +90,27 @@ async function generateTitle(aiResponse: string, settings: ReturnType<typeof get
         // @ts-ignore
         const response = await Promise.race([generatePromise, timeoutPromise]);
         // @ts-ignore
-        return response.message.content.trim().substring(0, 20);
+        let title = response.message.content.trim();
+
+        // Clean up the title
+        title = title
+            .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+            .replace(/^Title:\s*/i, '') // Remove "Title:" prefix if model adds it
+            .replace(/\.$/, '') // Remove trailing period
+            .trim();
+
+        // If the title is too long, take first 4-5 words
+        const words = title.split(/\s+/);
+        if (words.length > 5) {
+            title = words.slice(0, 4).join(' ');
+        }
+
+        // Ensure reasonable length (max 40 chars to show full words)
+        if (title.length > 40) {
+            title = title.substring(0, 37) + '...';
+        }
+
+        return title || 'New Chat';
     } catch (error) {
         console.error('Error generating title:', error);
         return 'New Chat';
@@ -81,14 +121,33 @@ export async function POST(req: Request) {
     let session: ChatSession | null = null;
 
     try {
-        const { messages, sessionId, personaId, personaPrompt, skipRag, model } = await req.json();
-
-        if (!messages || !Array.isArray(messages) || messages.length === 0) {
-            return new Response(JSON.stringify({ error: 'Invalid messages' }), {
+        // Parse and validate request body
+        let body: unknown;
+        try {
+            body = await req.json();
+        } catch {
+            return new Response(JSON.stringify({ error: 'Invalid JSON in request body' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
+
+        // Validate with Zod schema
+        const validation = ChatRequestSchema.safeParse(body);
+        if (!validation.success) {
+            const errorMessages = validation.error.errors.map(e =>
+                `${e.path.join('.')}: ${e.message}`
+            ).join('; ');
+            console.error('[Chat API] Validation failed:', errorMessages, '\nBody:', JSON.stringify(body, null, 2).slice(0, 500));
+            return new Response(JSON.stringify({
+                error: `Validation failed: ${errorMessages}`
+            }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        const { messages, sessionId, personaId, personaPrompt, skipRag, model } = validation.data;
 
         if (sessionId) {
             session = getSession(sessionId);
@@ -99,9 +158,13 @@ export async function POST(req: Request) {
             session = createSession(newId);
         }
 
-        // Save user message
+        // Save user message (ensure it has an id)
         const lastMessage = messages[messages.length - 1];
-        session.messages.push(lastMessage);
+        const messageWithId = {
+            ...lastMessage,
+            id: lastMessage.id || Date.now().toString()
+        };
+        session.messages.push(messageWithId);
         saveSession(session);
 
         // Context retrieval with error handling (skip if Quick Chat mode)
@@ -169,7 +232,7 @@ export async function POST(req: Request) {
 
         // Handle @filename referencing
         const fileRegex = /@([\w.-]+)/g;
-        const matches = lastMessage.content.matchAll(fileRegex);
+        const matches = Array.from(messageWithId.content.matchAll(fileRegex));
         for (const match of matches) {
             const fileName = match[1];
             const filePath = path.join(CONFIG.UPLOAD_DIR, fileName);
@@ -315,10 +378,11 @@ export async function POST(req: Request) {
                         });
                         saveSession(session);
 
-                        // Generate title after first AI response
-                        const userMessageCount = session.messages.filter(m => m.role === 'user').length;
-                        if (userMessageCount === 1 && fullText) {
-                            generateTitle(fullText, settings).then(title => {
+                        // Generate title after first AI response using the user's message
+                        const userMessages = session.messages.filter(m => m.role === 'user');
+                        if (userMessages.length === 1 && fullText) {
+                            const firstUserMessage = userMessages[0].content;
+                            generateTitle(firstUserMessage, settings).then(title => {
                                 if (session) {
                                     session.title = title;
                                     saveSession(session);

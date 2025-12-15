@@ -56,12 +56,39 @@ If you don't use the XML tags, just provide a direct response with citations.`;
 
 
 /**
- * Simple prompt for title generation
+ * Prompt for generating concise chat titles from user messages
+ * Designed to work well with smaller models (sub-billion parameters)
  */
 export const titlePrompt = (message: string) => {
-    return `Generate a very short, concise title (max 4 words) for a chat that starts with this message. Do not use quotes or punctuation.
+    // Clean up the message - remove excess whitespace and special chars
+    const cleanMessage = message
+        .substring(0, 150)
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-Message: "${message.substring(0, 200)}"
+    return `Create a short title (2-4 words) that captures the main topic of this question.
 
+Rules:
+- Maximum 4 words
+- No quotes or punctuation
+- Use title case (capitalize each word)
+- Focus on the key subject/topic
+- Be specific, not generic
+
+Examples:
+Q: "What is the capital of France?"
+Title: France Capital City
+
+Q: "How do I make pasta?"
+Title: Making Pasta
+
+Q: "Tell me about my friend John's birthday"
+Title: John Birthday Info
+
+Q: "What are the benefits of exercise?"
+Title: Exercise Benefits
+
+Q: "${cleanMessage}"
 Title:`;
 }

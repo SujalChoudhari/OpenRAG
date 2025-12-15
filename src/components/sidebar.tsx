@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { TextureButton } from "@/components/ui/texture-button";
 import { TextureSeparator } from "@/components/ui/texture-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { File, Trash2, Upload, PlusCircle, MessageSquare, Loader2, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { File, Trash2, Upload, PlusCircle, MessageSquare, Loader2, PanelLeftClose, PanelLeft, Database } from 'lucide-react';
 import { getVaultStats } from "@/app/actions";
 import * as React from 'react';
 import { useRef, useCallback, useState, useEffect } from 'react';
@@ -180,52 +180,51 @@ export function Sidebar({
             initial={false}
             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
         >
-            {/* Header with Logo */}
-            <div className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl overflow-hidden flex items-center justify-center">
-                        <Image src="/logo.png" alt="OpenRAG" width={80} height={80} className="object-cover" />
+            {/* Compact Header: Logo + New Chat merged */}
+            <div className={`p-3 flex items-center ${isCollapsed ? 'flex-col gap-3' : 'justify-between'}`}>
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0">
+                        <Image src="/logo.png" alt="OpenRAG" width={32} height={32} className="object-cover" />
                     </div>
                     <AnimatePresence mode="wait">
                         {!isCollapsed && (
-                            <motion.h2
+                            <motion.span
                                 initial={{ opacity: 0, x: -10 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 exit={{ opacity: 0, x: -10 }}
                                 transition={{ duration: 0.2 }}
-                                className="text-lg font-bold text-gradient whitespace-nowrap"
+                                className="text-sm font-bold text-gradient whitespace-nowrap"
                             >
                                 OpenRAG
-                            </motion.h2>
+                            </motion.span>
                         )}
                     </AnimatePresence>
                 </div>
-                <AnimatePresence mode="wait">
-                    {!isCollapsed && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex gap-1.5"
-                        >
-                            <SettingsDialog />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
 
-            {/* New Chat Button */}
-            <div className={`px-4 pb-3 ${isCollapsed ? 'px-3' : ''}`}>
-                <TextureButton
-                    onClick={onReset}
-                    variant="accent"
-                    className={`w-full ${isCollapsed ? 'h-10 w-10 px-0' : ''} rounded-xl`}
-                    disabled={isLoadingSession}
-                    title="New Chat"
-                >
-                    <PlusCircle className={`h-4 w-4 ${isCollapsed ? '' : 'mr-2'}`} />
-                    {!isCollapsed && <span>New Chat</span>}
-                </TextureButton>
+                <div className={`flex items-center gap-1.5 ${isCollapsed ? '' : ''}`}>
+                    <TextureButton
+                        onClick={onReset}
+                        variant="accent"
+                        size={isCollapsed ? 'icon-sm' : 'sm'}
+                        className={`${isCollapsed ? 'h-8 w-8' : 'h-8 px-3'} rounded-lg`}
+                        disabled={isLoadingSession}
+                        title="New Chat"
+                    >
+                        <PlusCircle className="h-3.5 w-3.5" />
+                        {!isCollapsed && <span className="ml-1.5 text-xs">New</span>}
+                    </TextureButton>
+                    <AnimatePresence mode="wait">
+                        {!isCollapsed && (
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                            >
+                                <SettingsDialog />
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
             </div>
 
             <TextureSeparator />
@@ -241,77 +240,60 @@ export function Sidebar({
                     >
                         <ScrollArea className="flex-1">
                             <div className="p-4 space-y-5">
-                                {/* Files Section */}
-                                <div className="glass-card rounded-xl p-4">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h3 className="text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                                            Knowledge Base
-                                        </h3>
-                                        <input
-                                            type="file"
-                                            ref={fileInputRef}
-                                            onChange={onUpload}
-                                            className="hidden"
-                                            multiple
-                                            accept=".txt,.md,.pdf,.json"
-                                        />
-                                        <TextureButton
-                                            onClick={triggerFileUpload}
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-7 text-xs"
-                                        >
-                                            <Upload className="h-3 w-3 mr-1.5" />
-                                            Add
-                                        </TextureButton>
+                                {/* Compact Knowledge Base Indicator */}
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={onUpload}
+                                    className="hidden"
+                                    multiple
+                                    accept=".txt,.md,.pdf,.json"
+                                />
+                                <div className="flex items-center justify-between px-1">
+                                    <div className="flex items-center gap-2">
+                                        <Database className="h-3.5 w-3.5 text-rose-400" />
+                                        <span className="text-xs text-neutral-400">
+                                            {vaultCount > 0 ? `${vaultCount} indexed` : 'No docs'}
+                                        </span>
                                     </div>
-
-                                    {vaultCount > 0 && (
-                                        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-rose-500/10 to-amber-500/10 border border-white/[0.06] flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-lg bg-rose-500/20 flex items-center justify-center text-rose-400">
-                                                <span className="text-xs font-bold">SB</span>
-                                            </div>
-                                            <div>
-                                                <div className="text-xs font-bold text-white">Knowledge Base Active</div>
-                                                <div className="text-[10px] text-rose-200/60">{vaultCount} items indexed</div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="space-y-2">
-                                        {files.length === 0 ? (
-                                            <div className="text-center py-8 border-2 border-dashed border-white/5 rounded-xl bg-white/[0.02]">
-                                                <File className="mx-auto h-8 w-8 text-neutral-600 mb-2 opacity-50" />
-                                                <p className="text-xs text-neutral-500">No files uploaded</p>
-                                            </div>
-                                        ) : (
-                                            files.map((file, i) => (
-                                                <div
-                                                    key={i}
-                                                    className="group flex items-center justify-between p-2.5 rounded-lg hover:bg-white/[0.04] border border-transparent hover:border-white/[0.04] transition-all"
-                                                >
-                                                    <div className="flex items-center space-x-2.5 overflow-hidden">
-                                                        <div className="p-1.5 rounded-md bg-indigo-500/10 text-indigo-400">
-                                                            <File className="h-3.5 w-3.5" />
-                                                        </div>
-                                                        <span className="text-sm text-neutral-300 truncate max-w-[140px] group-hover:text-neutral-100 transition-colors">
-                                                            {file}
-                                                        </span>
-                                                    </div>
-                                                    <button
-                                                        onClick={() => onDelete(file)}
-                                                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 hover:text-red-400 rounded-md transition-all"
-                                                    >
-                                                        <Trash2 className="h-3.5 w-3.5" />
-                                                    </button>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-
-                                    {/* Upload Progress */}
-                                    {renderUploadProgress()}
+                                    <TextureButton
+                                        onClick={triggerFileUpload}
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="h-6 w-6 rounded-md text-neutral-500 hover:text-neutral-300"
+                                        title="Add files"
+                                    >
+                                        <Upload className="h-3 w-3" />
+                                    </TextureButton>
                                 </div>
+
+                                {/* Only show files if present */}
+                                {files.length > 0 && (
+                                    <div className="space-y-1 mt-2">
+                                        {files.map((file, i) => (
+                                            <div
+                                                key={i}
+                                                className="group flex items-center justify-between p-2 rounded-lg hover:bg-white/[0.04] transition-all"
+                                            >
+                                                <div className="flex items-center space-x-2 overflow-hidden">
+                                                    <File className="h-3 w-3 text-neutral-500 flex-shrink-0" />
+                                                    <span className="text-xs text-neutral-400 truncate max-w-[160px] group-hover:text-neutral-200">
+                                                        {file}
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    onClick={() => onDelete(file)}
+                                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 hover:text-red-400 rounded transition-all"
+                                                >
+                                                    <Trash2 className="h-3 w-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Upload Progress */}
+                                {renderUploadProgress()}
 
                                 {/* History Section */}
                                 <div className="glass-card rounded-xl p-4">
@@ -373,37 +355,17 @@ export function Sidebar({
             </AnimatePresence>
 
             {/* Footer with toggle */}
-            {isCollapsed ? (
-                <div className="p-3 mt-auto flex justify-center border-t border-white/[0.08]">
-                    <TextureButton
-                        onClick={onToggleCollapse}
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Expand Sidebar"
-                        className="rounded-lg text-neutral-500 hover:text-neutral-200"
-                    >
-                        <PanelLeft className="h-4 w-4" />
-                    </TextureButton>
-                </div>
-            ) : (
-                <div className="mt-auto">
-                    <TextureSeparator />
-                    <div className="p-4 flex items-center justify-between">
-                        <span className="text-xs text-neutral-600">
-                            Powered by Ollama & OpenRAG
-                        </span>
-                        <TextureButton
-                            onClick={onToggleCollapse}
-                            variant="ghost"
-                            size="icon-sm"
-                            title="Collapse Sidebar"
-                            className="rounded-lg text-neutral-500 hover:text-neutral-200"
-                        >
-                            <PanelLeftClose className="h-4 w-4" />
-                        </TextureButton>
-                    </div>
-                </div>
-            )}
+            <div className="p-3 mt-auto flex justify-center border-t border-white/[0.08]">
+                <TextureButton
+                    onClick={onToggleCollapse}
+                    variant="ghost"
+                    size="icon-sm"
+                    title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                    className="rounded-lg text-neutral-500 hover:text-neutral-200"
+                >
+                    {isCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                </TextureButton>
+            </div>
 
             {/* Confirm Modals */}
             <ConfirmModal

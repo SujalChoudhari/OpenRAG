@@ -162,6 +162,123 @@ interface SourceData {
     similarity?: number;
 }
 
+/**
+ * ErrorCard component for displaying errors with retry option
+ * Provides user-friendly error messages with action buttons
+ */
+function ErrorCard({
+    error,
+    onRetry,
+    onDismiss
+}: {
+    error: string;
+    onRetry?: () => void;
+    onDismiss?: () => void;
+}) {
+    // Parse error for user-friendly message
+    const { message, suggestion } = useMemo(() => {
+        const lowerError = error.toLowerCase();
+        if (lowerError.includes('econnrefused') || lowerError.includes('fetch failed') || lowerError.includes('cannot connect')) {
+            return {
+                message: 'Cannot connect to Ollama',
+                suggestion: 'Please ensure Ollama is running and try again.'
+            };
+        }
+        if (lowerError.includes('model') && (lowerError.includes('not found') || lowerError.includes('does not exist'))) {
+            return {
+                message: 'Model not available',
+                suggestion: 'Check your model settings or pull the model with `ollama pull`.'
+            };
+        }
+        if (lowerError.includes('dimension') || lowerError.includes('vector')) {
+            return {
+                message: 'Embedding mismatch detected',
+                suggestion: 'Go to Settings and click "Re-index Vault" to fix this.'
+            };
+        }
+        if (lowerError.includes('timeout')) {
+            return {
+                message: 'Request timed out',
+                suggestion: 'The model may be loading. Please wait and try again.'
+            };
+        }
+        return {
+            message: error.length > 100 ? error.substring(0, 100) + '...' : error,
+            suggestion: 'If this persists, check your settings or restart the app.'
+        };
+    }, [error]);
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex justify-start mb-4"
+        >
+            <div className="flex items-start space-x-3 max-w-[85%]">
+                <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center border border-red-500/30">
+                    <AlertCircle className="w-4 h-4 text-red-400" />
+                </div>
+                <div className="glass-card p-4 rounded-2xl rounded-tl-none border border-red-500/20 bg-red-500/5">
+                    <div className="flex items-start gap-3">
+                        <div className="flex-1">
+                            <p className="text-sm font-medium text-red-300 mb-1">{message}</p>
+                            <p className="text-xs text-neutral-400">{suggestion}</p>
+                        </div>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                        {onRetry && (
+                            <button
+                                onClick={onRetry}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-500/20 text-red-300 hover:bg-red-500/30 rounded-lg transition-colors"
+                            >
+                                <Loader2 className="w-3 h-3" />
+                                Retry
+                            </button>
+                        )}
+                        {onDismiss && (
+                            <button
+                                onClick={onDismiss}
+                                className="px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-300 rounded-lg transition-colors"
+                            >
+                                Dismiss
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </motion.div>
+    );
+}
+
+/**
+ * Connection status indicator component
+ * Shows current connection state to Ollama
+ */
+function ConnectionStatus({
+    status
+}: {
+    status: 'connected' | 'disconnected' | 'checking'
+}) {
+    const config = useMemo(() => {
+        switch (status) {
+            case 'connected':
+                return { color: 'bg-emerald-500', text: 'Connected', pulse: false };
+            case 'disconnected':
+                return { color: 'bg-red-500', text: 'Disconnected', pulse: false };
+            case 'checking':
+                return { color: 'bg-amber-500', text: 'Checking...', pulse: true };
+        }
+    }, [status]);
+
+    return (
+        <div className="flex items-center gap-1.5 text-xs text-neutral-400">
+            <div className={`w-2 h-2 rounded-full ${config.color} ${config.pulse ? 'animate-pulse' : ''}`} />
+            <span>{config.text}</span>
+        </div>
+    );
+}
+
 export function ChatArea({
     messages,
     input,
@@ -570,27 +687,82 @@ export function ChatArea({
 
             {/* Persona Header Bar */}
             {personaSelector && (
-                <div className="flex items-center justify-between px-6 py-3 border-b border-white/[0.05] bg-black/60 backdrop-blur-xl z-20">
-                    <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.05] bg-black/60 backdrop-blur-xl z-20">
+                    <div className="flex items-center gap-2">
                         {sidebarCollapsed && (
                             <TextureButton
                                 onClick={onToggleSidebar}
                                 variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg mr-1 text-neutral-400 hover:text-white"
+                                size="icon-sm"
+                                className="h-7 w-7 rounded-lg text-neutral-400 hover:text-white"
                                 title="Expand Sidebar"
                             >
-                                <PanelLeft className="h-4 w-4" />
+                                <PanelLeft className="h-3.5 w-3.5" />
                             </TextureButton>
                         )}
-                        {selectedPersona && (
-                            <>
-                                <span className="text-xl">{selectedPersona.avatar || '🤖'}</span>
-                                <div>
-                                    <div className="text-sm font-medium text-gray-200">{selectedPersona.name}</div>
-                                    <div className="text-xs text-gray-500">{selectedPersona.role}</div>
+
+                        {/* Quick Chat Toggle */}
+                        <button
+                            type="button"
+                            onClick={onQuickChatToggle}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${quickChatMode
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                : 'bg-neutral-800/60 text-neutral-400 border border-white/[0.08] hover:bg-neutral-800 hover:text-neutral-300'
+                                }`}
+                            title={quickChatMode ? 'Quick Chat: ON (No RAG/Persona)' : 'Quick Chat: OFF (Using RAG + Persona)'}
+                        >
+                            <Zap className={`w-3 h-3 ${quickChatMode ? 'text-amber-400' : ''}`} />
+                            <span>Quick</span>
+                        </button>
+
+                        {/* Model Selector */}
+                        {availableModels.length > 0 && (
+                            <div className="relative group">
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-800/60 text-neutral-400 border border-white/[0.08] hover:bg-neutral-800 hover:text-neutral-300 hover:border-white/15 transition-all"
+                                >
+                                    <Cpu className="w-3 h-3" />
+                                    <span className="max-w-[80px] truncate">
+                                        {selectedModel || 'Default'}
+                                    </span>
+                                    <ChevronDown className="w-3 h-3 opacity-50" />
+                                </button>
+                                {/* Dropdown Menu */}
+                                <div className="absolute top-full mt-1 left-0 min-w-[180px] max-h-[200px] overflow-y-auto glass-card rounded-xl shadow-2xl border border-white/[0.08] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                                    <div className="p-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => onModelSelect?.('')}
+                                            className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${!selectedModel
+                                                ? 'bg-rose-500/20 text-rose-300'
+                                                : 'text-neutral-300 hover:bg-white/[0.06]'
+                                                }`}
+                                        >
+                                            Default Model
+                                        </button>
+                                        {availableModels.map((model) => (
+                                            <button
+                                                key={model}
+                                                type="button"
+                                                onClick={() => onModelSelect?.(model)}
+                                                className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors truncate ${selectedModel === model
+                                                    ? 'bg-rose-500/20 text-rose-300'
+                                                    : 'text-neutral-300 hover:bg-white/[0.06]'
+                                                    }`}
+                                            >
+                                                {model}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                            </>
+                            </div>
+                        )}
+
+                        {quickChatMode && (
+                            <span className="text-[10px] text-amber-500/70">
+                                ⚡ Direct LLM
+                            </span>
                         )}
                     </div>
                     {personaSelector}
@@ -692,8 +864,8 @@ export function ChatArea({
                                     <span className="w-2 h-2 bg-gradient-to-r from-rose-400 to-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                                 </div>
                                 <span className="text-xs text-neutral-500 ml-1">{typingMessage}</span>
-                                {/* RAG Status Indicator */}
-                                {ragStatus && (
+                                {/* RAG Status Indicator - only show when NOT in Quick Chat mode */}
+                                {ragStatus && !quickChatMode && (
                                     <div className={`flex items-center gap-1.5 text-xs ml-1 ${ragStatus.error ? 'text-red-400' : ragStatus.found > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
                                         <Database className="w-3 h-3" />
                                         {ragStatus.error ? (
@@ -738,122 +910,9 @@ export function ChatArea({
                     )}
                 </AnimatePresence>
 
-                <AnimatePresence>
-                    {(ragStatus || isTyping) && (
-                        <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 10 }}
-                            className="absolute -top-12 left-0 right-0 flex justify-center pointer-events-none z-0"
-                        >
-                            <div className="bg-[#0a0a0a]/90 backdrop-blur border border-white/10 shadow-glow px-4 py-1.5 rounded-full flex items-center gap-3 text-xs">
-                                {ragStatus?.searched ? (
-                                    <>
-                                        {ragStatus.found > 0 ? (
-                                            <span className="text-emerald-400 flex items-center gap-1.5">
-                                                <CheckCircle2 className="w-3 h-3" />
-                                                Found {ragStatus.found} sources
-                                            </span>
-                                        ) : (
-                                            <span className="text-amber-400 flex items-center gap-1.5">
-                                                <AlertCircle className="w-3 h-3" />
-                                                No relevant sources found
-                                            </span>
-                                        )}
-                                        <span className="w-px h-3 bg-white/10" />
-                                    </>
-                                ) : (ragStatus && !ragStatus.searched) ? (
-                                    <>
-                                        <span className="text-rose-400 flex items-center gap-1.5">
-                                            <Search className="w-3 h-3 animate-pulse" />
-                                            Searching knowledge base...
-                                        </span>
-                                        <span className="w-px h-3 bg-white/10" />
-                                    </>
-                                ) : null}
-
-                                {isTyping ? (
-                                    <span className="text-neutral-300 flex items-center gap-1.5">
-                                        <Loader2 className="w-3 h-3 animate-spin text-rose-500" />
-                                        Generating response...
-                                    </span>
-                                ) : (
-                                    <span className="text-neutral-500">Ready</span>
-                                )}
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                {/* Removed floating status badge - it was cluttering the UI */}
 
                 <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group z-10">
-                    {/* Quick Chat Toggle and Model Selector */}
-                    <div className="flex items-center gap-2 mb-3">
-                        {/* Quick Chat Toggle */}
-                        <button
-                            type="button"
-                            onClick={onQuickChatToggle}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${quickChatMode
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                : 'bg-neutral-800/60 text-neutral-400 border border-white/[0.08] hover:bg-neutral-800 hover:text-neutral-300'
-                                }`}
-                            title={quickChatMode ? 'Quick Chat: ON (No RAG/Persona)' : 'Quick Chat: OFF (Using RAG + Persona)'}
-                        >
-                            <Zap className={`w-3 h-3 ${quickChatMode ? 'text-amber-400' : ''}`} />
-                            <span>Quick</span>
-                        </button>
-
-                        {/* Model Selector - Custom Styled Dropdown */}
-                        {availableModels.length > 0 && (
-                            <div className="relative group">
-                                <button
-                                    type="button"
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800/60 text-neutral-400 border border-white/[0.08] hover:bg-neutral-800 hover:text-neutral-300 hover:border-white/15 transition-all"
-                                >
-                                    <Cpu className="w-3 h-3" />
-                                    <span className="max-w-[100px] truncate">
-                                        {selectedModel || 'Default'}
-                                    </span>
-                                    <ChevronDown className="w-3 h-3 opacity-50" />
-                                </button>
-                                {/* Dropdown Menu */}
-                                <div className="absolute bottom-full mb-1 left-0 min-w-[180px] max-h-[200px] overflow-y-auto glass-card rounded-xl shadow-2xl border border-white/[0.08] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                                    <div className="p-1">
-                                        <button
-                                            type="button"
-                                            onClick={() => onModelSelect?.('')}
-                                            className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${!selectedModel
-                                                ? 'bg-rose-500/20 text-rose-300'
-                                                : 'text-neutral-300 hover:bg-white/[0.06]'
-                                                }`}
-                                        >
-                                            Default Model
-                                        </button>
-                                        {availableModels.map((model) => (
-                                            <button
-                                                key={model}
-                                                type="button"
-                                                onClick={() => onModelSelect?.(model)}
-                                                className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors truncate ${selectedModel === model
-                                                    ? 'bg-rose-500/20 text-rose-300'
-                                                    : 'text-neutral-300 hover:bg-white/[0.06]'
-                                                    }`}
-                                            >
-                                                {model}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Quick Chat indicator */}
-                        {quickChatMode && (
-                            <span className="text-[10px] text-amber-500/70 ml-1">
-                                ⚡ Direct LLM access
-                            </span>
-                        )}
-                    </div>
-
                     <div className="relative">
                         <textarea
                             ref={inputRef}
