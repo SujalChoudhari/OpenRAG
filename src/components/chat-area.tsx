@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { TextureButton } from "@/components/ui/texture-button";
 import { Message } from 'ai';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Send, Bot, User, Brain, ChevronDown, ChevronRight, Sparkles, BookOpen, Database, AlertCircle, PanelLeft, CheckCircle2, FileText, Search, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Brain, ChevronDown, ChevronRight, Sparkles, BookOpen, Database, AlertCircle, PanelLeft, CheckCircle2, FileText, Search, Loader2, Zap, Cpu, Square } from 'lucide-react';
 import Markdown from "react-markdown";
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
@@ -39,6 +39,15 @@ interface ChatAreaProps {
     onToggleSidebar?: () => void;
     streamingThinking?: string;
     setInput?: (value: string) => void;
+    // Quick Chat Mode
+    quickChatMode?: boolean;
+    onQuickChatToggle?: () => void;
+    // Model Selection
+    selectedModel?: string;
+    availableModels?: string[];
+    onModelSelect?: (model: string) => void;
+    // Stop generation
+    onStop?: () => void;
 }
 
 interface ParsedResponse {
@@ -167,7 +176,13 @@ export function ChatArea({
     sidebarCollapsed = false,
     onToggleSidebar,
     streamingThinking = '',
-    setInput
+    setInput,
+    quickChatMode = false,
+    onQuickChatToggle,
+    selectedModel = '',
+    availableModels = [],
+    onModelSelect,
+    onStop
 }: ChatAreaProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
@@ -213,7 +228,22 @@ export function ChatArea({
     // Autocomplete state
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [autocompleteQuery, setAutocompleteQuery] = useState('');
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
+
+    // Auto-resize textarea when input changes (especially on clear/send)
+    useEffect(() => {
+        if (inputRef.current) {
+            const target = inputRef.current;
+            // Reset to auto first to properly calculate new height
+            target.style.height = 'auto';
+            // If empty, keep at minimum height, otherwise calculate based on content
+            if (!input || input.trim() === '') {
+                target.style.height = '60px'; // min-height value
+            } else {
+                target.style.height = Math.min(target.scrollHeight, 200) + 'px';
+            }
+        }
+    }, [input]);
 
     // Debounce autocomplete query
     const debouncedQuery = useDebounce(autocompleteQuery, 150);
@@ -596,23 +626,30 @@ export function ChatArea({
                         className="flex justify-start"
                     >
                         <div className="flex items-start space-x-3">
-                            <div className="w-8 h-8 rounded-full bg-neutral-800/80 flex items-center justify-center border border-white/[0.06]">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500/20 to-amber-500/20 flex items-center justify-center border border-rose-500/20 shadow-lg shadow-rose-500/10">
                                 <Brain className="w-5 h-5 text-rose-400 animate-pulse" />
                             </div>
-                            <div className="glass-panel bg-black/40 border border-rose-500/10 rounded-2xl rounded-tl-none p-4 max-w-[85%] relative overflow-hidden">
-                                <div className="flex items-center gap-2 text-rose-400/70 mb-2 select-none">
-                                    <Brain className="w-3 h-3 animate-pulse" />
-                                    <span className="text-[10px] font-bold uppercase tracking-wider">Thinking...</span>
-                                    <button
-                                        onClick={() => setThinkingCollapsed(true)}
-                                        className="ml-auto hover:bg-white/10 p-1 rounded transition-colors"
-                                    >
-                                        <ChevronDown className="w-3 h-3" />
-                                    </button>
-                                </div>
-                                <div className="font-mono text-xs text-gray-400 whitespace-pre-wrap leading-relaxed opacity-90 max-h-48 overflow-y-auto">
-                                    {streamingThinking}
-                                    <span className="inline-block w-1.5 h-4 bg-rose-500/50 align-middle animate-pulse ml-1" />
+                            <div className="bg-gradient-to-br from-neutral-900/95 to-neutral-950/95 backdrop-blur-xl border border-white/[0.08] ring-1 ring-rose-500/10 rounded-2xl rounded-tl-none p-4 max-w-[85%] relative overflow-hidden shadow-xl shadow-black/20">
+                                {/* Subtle gradient overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-br from-rose-500/[0.03] to-transparent pointer-events-none" />
+                                <div className="relative">
+                                    <div className="flex items-center gap-2 text-rose-400 mb-3 select-none">
+                                        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20">
+                                            <Brain className="w-3 h-3 animate-pulse" />
+                                            <span className="text-[10px] font-bold uppercase tracking-wider">Thinking</span>
+                                        </div>
+                                        <div className="flex-1 h-px bg-gradient-to-r from-rose-500/20 to-transparent" />
+                                        <button
+                                            onClick={() => setThinkingCollapsed(true)}
+                                            className="hover:bg-white/10 p-1.5 rounded-lg transition-colors text-rose-400/60 hover:text-rose-400"
+                                        >
+                                            <ChevronDown className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                    <div className="font-mono text-xs text-neutral-300 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                                        {streamingThinking}
+                                        <span className="inline-block w-1.5 h-4 bg-gradient-to-t from-rose-500 to-amber-500 rounded-sm align-middle animate-pulse ml-1" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -749,24 +786,124 @@ export function ChatArea({
                 </AnimatePresence>
 
                 <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group z-10">
-                    <Input
-                        ref={inputRef}
-                        name="chat-input"
-                        value={input}
-                        onChange={handleInputWrapper}
-                        placeholder="Ask anything about your life... (Type @ to reference)"
-                        className="w-full pl-6 pr-14 py-7 bg-neutral-900/80 border-white/[0.08] focus:border-rose-500/40 focus:ring-rose-500/20 rounded-2xl text-neutral-100 placeholder:text-neutral-500 shadow-glow transition-all hover:bg-neutral-900 hover:border-white/15"
-                        autoComplete="off"
-                        disabled={isTyping}
-                    />
-                    <Button
-                        type="submit"
-                        size="icon"
-                        disabled={!input.trim() || isTyping}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl w-10 h-10 bg-gradient-to-tr from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-glow-accent disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                    >
-                        <Send className="h-4 w-4" />
-                    </Button>
+                    {/* Quick Chat Toggle and Model Selector */}
+                    <div className="flex items-center gap-2 mb-3">
+                        {/* Quick Chat Toggle */}
+                        <button
+                            type="button"
+                            onClick={onQuickChatToggle}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${quickChatMode
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                : 'bg-neutral-800/60 text-neutral-400 border border-white/[0.08] hover:bg-neutral-800 hover:text-neutral-300'
+                                }`}
+                            title={quickChatMode ? 'Quick Chat: ON (No RAG/Persona)' : 'Quick Chat: OFF (Using RAG + Persona)'}
+                        >
+                            <Zap className={`w-3 h-3 ${quickChatMode ? 'text-amber-400' : ''}`} />
+                            <span>Quick</span>
+                        </button>
+
+                        {/* Model Selector - Custom Styled Dropdown */}
+                        {availableModels.length > 0 && (
+                            <div className="relative group">
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800/60 text-neutral-400 border border-white/[0.08] hover:bg-neutral-800 hover:text-neutral-300 hover:border-white/15 transition-all"
+                                >
+                                    <Cpu className="w-3 h-3" />
+                                    <span className="max-w-[100px] truncate">
+                                        {selectedModel || 'Default'}
+                                    </span>
+                                    <ChevronDown className="w-3 h-3 opacity-50" />
+                                </button>
+                                {/* Dropdown Menu */}
+                                <div className="absolute bottom-full mb-1 left-0 min-w-[180px] max-h-[200px] overflow-y-auto glass-card rounded-xl shadow-2xl border border-white/[0.08] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                                    <div className="p-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => onModelSelect?.('')}
+                                            className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${!selectedModel
+                                                ? 'bg-rose-500/20 text-rose-300'
+                                                : 'text-neutral-300 hover:bg-white/[0.06]'
+                                                }`}
+                                        >
+                                            Default Model
+                                        </button>
+                                        {availableModels.map((model) => (
+                                            <button
+                                                key={model}
+                                                type="button"
+                                                onClick={() => onModelSelect?.(model)}
+                                                className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors truncate ${selectedModel === model
+                                                    ? 'bg-rose-500/20 text-rose-300'
+                                                    : 'text-neutral-300 hover:bg-white/[0.06]'
+                                                    }`}
+                                            >
+                                                {model}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Quick Chat indicator */}
+                        {quickChatMode && (
+                            <span className="text-[10px] text-amber-500/70 ml-1">
+                                ⚡ Direct LLM access
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="relative">
+                        <textarea
+                            ref={inputRef}
+                            name="chat-input"
+                            value={input}
+                            onChange={handleInputWrapper}
+                            onKeyDown={(e) => {
+                                // Enter submits, Shift+Enter adds new line
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    if (input.trim() && !isTyping) {
+                                        const form = e.currentTarget.closest('form');
+                                        form?.requestSubmit();
+                                    }
+                                }
+                            }}
+                            onInput={(e) => {
+                                // Auto-resize textarea
+                                const target = e.currentTarget;
+                                target.style.height = 'auto';
+                                target.style.height = Math.min(target.scrollHeight, 200) + 'px';
+                            }}
+                            placeholder={quickChatMode ? "Ask the LLM directly..." : "Ask anything... (@ to reference, Shift+Enter for new line)"}
+                            className={`w-full pl-6 pr-14 py-5 min-h-[60px] max-h-[200px] resize-none bg-neutral-900/80 border border-white/[0.08] focus:border-rose-500/40 focus:ring-1 focus:ring-rose-500/20 focus:outline-none rounded-2xl text-neutral-100 placeholder:text-neutral-500 shadow-glow transition-all hover:bg-neutral-900 hover:border-white/15 ${quickChatMode ? 'border-amber-500/20' : ''
+                                }`}
+                            autoComplete="off"
+                            disabled={isTyping}
+                            rows={1}
+                        />
+                        {isTyping ? (
+                            <Button
+                                type="button"
+                                size="icon"
+                                onClick={onStop}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl w-10 h-10 bg-red-600 hover:bg-red-500 text-white shadow-glow-accent transition-all"
+                                title="Stop generation"
+                            >
+                                <Square className="h-4 w-4 fill-current" />
+                            </Button>
+                        ) : (
+                            <Button
+                                type="submit"
+                                size="icon"
+                                disabled={!input.trim()}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl w-10 h-10 bg-gradient-to-tr from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-glow-accent disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            >
+                                <Send className="h-4 w-4" />
+                            </Button>
+                        )}
+                    </div>
                 </form>
             </div>
 

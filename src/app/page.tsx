@@ -50,6 +50,9 @@ export default function ChatInterface() {
   const [appState, setAppState] = useState<'loading' | 'onboarding' | 'ready' | 'error'>('loading');
   const [loadingMessage, setLoadingMessage] = useState('Initializing...');
   const [loadingSubMessage, setLoadingSubMessage] = useState<string | undefined>();
+  const [quickChatMode, setQuickChatMode] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   // Toast hook - must be called before useEffects that use it
   const { showToast } = useToast();
@@ -57,12 +60,14 @@ export default function ChatInterface() {
   // Track if files have been loaded to prevent infinite loops
   const filesLoadedRef = useRef(false);
 
-  const { messages, input, handleInputChange, handleSubmit, setMessages, setInput, data, isLoading } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, setMessages, setInput, data, isLoading, stop } = useChat({
     keepLastMessageOnError: true,
     body: {
       sessionId,
       personaId: selectedPersona?.id,
-      personaPrompt: selectedPersona?.systemPrompt
+      personaPrompt: quickChatMode ? null : selectedPersona?.systemPrompt,
+      skipRag: quickChatMode,
+      model: selectedModel || undefined
     },
     onResponse: (response) => {
       setIsTyping(false);
@@ -121,7 +126,7 @@ export default function ChatInterface() {
         setLoadingMessage('Connecting to Ollama...');
         setLoadingSubMessage('Checking connection status');
 
-        // Check Ollama status via API
+        // Check Ollama status via API and get models
         const ollamaRes = await fetch('/api/models');
         if (!ollamaRes.ok) {
           setLoadingMessage('Ollama not available');
@@ -131,6 +136,12 @@ export default function ChatInterface() {
           const retryRes = await fetch('/api/models');
           if (!retryRes.ok) {
             showToast('Could not connect to Ollama. Please start Ollama manually.', 'warning');
+          }
+        } else {
+          // Store available models
+          const modelsData = await ollamaRes.json();
+          if (modelsData.success && modelsData.models) {
+            setAvailableModels(modelsData.models.map((m: { name: string }) => m.name));
           }
         }
 
@@ -371,6 +382,12 @@ export default function ChatInterface() {
             selectedPersona={selectedPersona}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+            quickChatMode={quickChatMode}
+            onQuickChatToggle={() => setQuickChatMode(!quickChatMode)}
+            selectedModel={selectedModel}
+            availableModels={availableModels}
+            onModelSelect={setSelectedModel}
+            onStop={stop}
           />
 
           {/* Vault Changes Popup */}

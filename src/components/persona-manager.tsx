@@ -81,6 +81,7 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
     const [genVaultQuery, setGenVaultQuery] = useState('');
     const [genCustomContext, setGenCustomContext] = useState('');
     const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+    const [generationStatus, setGenerationStatus] = useState('');
 
     // Edit state
     const [showEditor, setShowEditor] = useState(false);
@@ -173,7 +174,16 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
         }
 
         setIsGenerating(true);
+        setGenerationStatus('🔍 Preparing context...');
+
         try {
+            // Brief delay to show initial status
+            await new Promise(r => setTimeout(r, 300));
+            setGenerationStatus('📚 Gathering source files...');
+
+            await new Promise(r => setTimeout(r, 400));
+            setGenerationStatus('🤖 AI is generating persona...');
+
             const res = await fetch('/api/personas/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -187,6 +197,7 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
                 })
             });
 
+            setGenerationStatus('✨ Finalizing persona...');
             const response: ApiResponse<Persona> = await res.json();
 
             if (response.success && response.data) {
@@ -202,6 +213,7 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
             showToast('Failed to generate persona', 'error');
         } finally {
             setIsGenerating(false);
+            setGenerationStatus('');
         }
     };
 
@@ -212,6 +224,7 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
         setGenVaultQuery('');
         setGenCustomContext('');
         setSelectedFiles([]);
+        setGenerationStatus('');
     };
 
     const selectedPersona = personas.find(p => p.id === selectedPersonaId);
@@ -473,7 +486,7 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
                                             {isGenerating ? (
                                                 <>
                                                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                                    Generating Persona...
+                                                    <span className="truncate">{generationStatus || 'Generating...'}</span>
                                                 </>
                                             ) : (
                                                 <>
@@ -572,6 +585,23 @@ export function PersonaManager({ selectedPersonaId, onSelectPersona, files = [] 
                                                         );
                                                     })}
                                                 </div>
+                                            </div>
+
+                                            {/* System Prompt - Editable */}
+                                            <div className="space-y-1.5 mt-4 pt-4 border-t border-white/[0.08]">
+                                                <Label className="text-xs text-neutral-400 font-medium flex items-center gap-2">
+                                                    <span>System Prompt</span>
+                                                    <span className="text-[10px] text-neutral-600">(Advanced)</span>
+                                                </Label>
+                                                <textarea
+                                                    value={editingPersona.systemPrompt || ''}
+                                                    onChange={e => setEditingPersona({ ...editingPersona, systemPrompt: e.target.value })}
+                                                    placeholder="Custom system prompt for this persona..."
+                                                    className="w-full h-32 text-xs font-mono bg-black/30 border border-white/[0.08] rounded-xl p-3 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-neutral-300 placeholder:text-neutral-600"
+                                                />
+                                                <p className="text-[10px] text-neutral-600">
+                                                    This prompt defines the persona's behavior. Edit with caution.
+                                                </p>
                                             </div>
                                         </div>
                                     </ScrollArea>

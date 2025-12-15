@@ -10,6 +10,7 @@
     "lint": "next lint",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron-build": "npm run build && electron-builder",
+    "install-app": "npm run build && electron-builder --win",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

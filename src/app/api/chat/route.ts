@@ -21,6 +21,34 @@ interface Source {
     similarity: number;
 }
 
+/**
+ * Format a source block with clear visual separation and metadata
+ * This helps the LLM understand each source is independent
+ */
+function formatSourceBlock(
+    sourceNumber: number,
+    filename: string,
+    score: number,
+    content: string,
+    metadata?: Record<string, unknown>
+): string {
+    const scorePercent = (score * 100).toFixed(1);
+    const metadataStr = metadata && Object.keys(metadata).length > 0
+        ? `\n📋 Additional Info: ${JSON.stringify(metadata)}`
+        : '';
+
+    return `
+════════════════════════════════════════════════════════════════════════════════
+📄 SOURCE ${sourceNumber}
+────────────────────────────────────────────────────────────────────────────────
+📁 File: ${filename}
+📊 Relevance: ${scorePercent}%${metadataStr}
+────────────────────────────────────────────────────────────────────────────────
+${content}
+════════════════════════════════════════════════════════════════════════════════
+`;
+}
+
 async function generateTitle(aiResponse: string, settings: ReturnType<typeof getSettings>): Promise<string> {
     try {
         const ollama = new Ollama({ host: settings.ollamaHost });
@@ -53,7 +81,7 @@ export async function POST(req: Request) {
     let session: ChatSession | null = null;
 
     try {
-        const { messages, sessionId, personaId, personaPrompt } = await req.json();
+        const { messages, sessionId, personaId, personaPrompt, skipRag, model } = await req.json();
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return new Response(JSON.stringify({ error: 'Invalid messages' }), {
@@ -76,43 +104,67 @@ export async function POST(req: Request) {
         session.messages.push(lastMessage);
         saveSession(session);
 
-        // Context retrieval with error handling
+        // Context retrieval with error handling (skip if Quick Chat mode)
         let context = "";
         let sources: Source[] = [];
         let ragStatus = { searched: false, found: 0, error: null as string | null };
+        let sourceNumber = 1;
 
-        try {
-            const searchResult = await hierarchicalSearch(lastMessage.content);
-            ragStatus.searched = true;
+        // Only perform RAG search if not in Quick Chat mode
+        if (!skipRag) {
+            try {
+                const searchResult = await hierarchicalSearch(lastMessage.content);
+                ragStatus.searched = true;
 
-            if (searchResult.bestDocument) {
-                context += `Best Matching Document:\n${searchResult.bestDocument.original_text}\n\n`;
-                sources.push({
-                    id: searchResult.bestDocument.id,
-                    text: searchResult.bestDocument.original_text,
-                    similarity: searchResult.bestDocument.score
-                });
-            }
-
-            if (searchResult.topChunks.length > 0) {
-                context += `Relevant Context from Vault:\n`;
-                searchResult.topChunks.forEach((chunk) => {
-                    const sourceFile = chunk.source || 'unknown';
-                    context += `--- From "${sourceFile}" ---\n${chunk.original_text}\n\n`;
+                // Add best matching document as Source 1
+                if (searchResult.bestDocument) {
+                    const docSource = searchResult.bestDocument.id || 'document';
+                    context += formatSourceBlock(
+                        sourceNumber,
+                        docSource,
+                        searchResult.bestDocument.score,
+                        searchResult.bestDocument.original_text,
+                        { type: 'Best Matching Document' }
+                    );
                     sources.push({
-                        id: chunk.id,
-                        text: chunk.original_text,
-                        similarity: chunk.score,
-                        source: sourceFile
+                        id: searchResult.bestDocument.id,
+                        text: searchResult.bestDocument.original_text,
+                        similarity: searchResult.bestDocument.score
                     });
-                });
-            }
+                    sourceNumber++;
+                }
 
-            ragStatus.found = sources.length;
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            ragStatus.error = errorMsg;
-            console.error('RAG Search Error:', errorMsg);
+                // Add relevant chunks as additional sources
+                if (searchResult.topChunks.length > 0) {
+                    searchResult.topChunks.forEach((chunk) => {
+                        const sourceFile = chunk.source || 'unknown';
+                        context += formatSourceBlock(
+                            sourceNumber,
+                            sourceFile,
+                            chunk.score,
+                            chunk.original_text,
+                            { type: 'Vault Chunk' }
+                        );
+                        sources.push({
+                            id: chunk.id,
+                            text: chunk.original_text,
+                            similarity: chunk.score,
+                            source: sourceFile
+                        });
+                        sourceNumber++;
+                    });
+                }
+
+                ragStatus.found = sources.length;
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                ragStatus.error = errorMsg;
+                console.error('RAG Search Error:', errorMsg);
+            }
+        } else {
+            // Quick Chat mode - no RAG
+            ragStatus.searched = false;
+            ragStatus.found = 0;
         }
 
         // Handle @filename referencing
@@ -124,7 +176,14 @@ export async function POST(req: Request) {
             if (fs.existsSync(filePath)) {
                 try {
                     const fileContent = fs.readFileSync(filePath, 'utf-8');
-                    context += `\n\n--- Referenced File: ${fileName} ---\n${fileContent}\n--- End of File ---\n\n`;
+                    context += formatSourceBlock(
+                        sourceNumber,
+                        fileName,
+                        1.0, // Direct reference = 100% relevance
+                        fileContent,
+                        { type: 'User Referenced File', note: 'Explicitly mentioned by user with @' }
+                    );
+                    sourceNumber++;
                 } catch (err) {
                     console.error(`Error reading referenced file ${fileName}:`, err);
                 }
@@ -144,16 +203,22 @@ export async function POST(req: Request) {
         }
 
 
-        // Build system prompt: persona + RAG context
+        // Build system prompt: persona + RAG context OR quick chat mode
         let finalPrompt: string;
 
-        if (personaPrompt) {
+        if (skipRag) {
+            // Quick Chat mode - minimal prompt, no RAG context
+            finalPrompt = `You are a helpful AI assistant. Answer the user's question directly and thoroughly.`;
+        } else if (personaPrompt) {
             // Persona-based conversation: combine persona prompt with RAG context
             finalPrompt = `${personaPrompt}\n\n---\n\n## Retrieved Knowledge Context\n${context || 'No specific context retrieved for this query.'}\n\n---\n\nRemember to stay in character while using the above context to inform your response.`;
         } else {
             // Default RAG prompt
             finalPrompt = systemPrompt(context);
         }
+
+        // Use specified model or default from settings
+        const chatModel = model || settings.chatModel;
 
         const ollamaClient = new Ollama({ host: settings.ollamaHost });
         const encoder = new TextEncoder();
@@ -190,7 +255,7 @@ export async function POST(req: Request) {
                 try {
 
                     const response = await ollamaClient.chat({
-                        model: settings.chatModel,
+                        model: chatModel,
                         messages: [
                             { role: 'system', content: finalPrompt },
                             ...messages.map((m: any) => ({ role: m.role, content: m.content }))

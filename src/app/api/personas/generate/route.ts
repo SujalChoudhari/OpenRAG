@@ -94,36 +94,56 @@ export async function POST(req: NextRequest) {
         // Generate persona using AI
         const ollama = createOllama({ baseURL: settings.ollamaHost + '/api' });
 
-        const generationPrompt = `You are a persona designer. Based on the following context, create a detailed persona definition for someone named "${body.name}".
-${body.description ? `Description hint: ${body.description}` : ''}
-${body.role ? `Role hint: ${body.role}` : ''}
+        // Enhanced prompt designed for smaller parameter models (sub-million)
+        // Uses step-by-step instructions and a complete example
+        const generationPrompt = `# PERSONA GENERATION TASK
 
-Context about this persona:
-${context || 'No specific context provided. Create a general helpful assistant persona.'}
+You are creating an AI persona profile. Follow these steps carefully.
 
-Generate a JSON object with these fields:
+## STEP 1: Read the context
+${context ? `Here is information about the persona to create:\n\n${context}` : 'No specific context provided. Create a helpful assistant persona.'}
+
+## STEP 2: Understand the requirements
+- Name: "${body.name}"
+${body.role ? `- Role hint: "${body.role}"` : '- Role: Create an appropriate role based on context'}
+${body.description ? `- Description hint: "${body.description}"` : '- Description: Create from context'}
+
+## STEP 3: Generate JSON output
+
+Look at this EXAMPLE first:
+\`\`\`json
 {
-  "role": "A one-line description of the persona's role",
-  "description": "2-3 sentences describing who this persona is and their background",
-  "objectives": ["Goal 1", "Goal 2", "Goal 3"],
-  "constraints": ["What they should NOT do 1", "What they should NOT do 2"],
-  "knowledgeBoundaries": ["Topic they know about 1", "Topic 2", "Topic 3"],
+  "role": "Personal fitness coach and wellness mentor",
+  "description": "A supportive and knowledgeable fitness expert who helps people achieve their health goals through personalized advice and motivation.",
+  "objectives": ["Help users reach fitness goals", "Provide workout guidance", "Encourage healthy habits"],
+  "constraints": ["Never recommend dangerous exercises", "Never give medical diagnoses"],
+  "knowledgeBoundaries": ["Exercise routines", "Nutrition basics", "Motivation techniques"],
   "exampleInteractions": [
-    {"user": "Example user question", "assistant": "How the persona would respond"}
+    {"user": "How do I start working out?", "assistant": "Great question! Let's start with your current fitness level..."}
   ],
   "tone": {
-    "formality": "casual|neutral|formal|professional",
-    "warmth": "cold|neutral|warm|enthusiastic",
-    "directness": "indirect|balanced|direct|blunt",
-    "verbosity": "concise|balanced|detailed|verbose"
+    "formality": "casual",
+    "warmth": "enthusiastic",
+    "directness": "direct",
+    "verbosity": "balanced"
   }
 }
+\`\`\`
 
-Important:
-- Base the persona on the provided context
-- Make the persona feel authentic and consistent
-- Include specific knowledge from the context
-- Output ONLY valid JSON, no other text`;
+## YOUR OUTPUT
+
+Now create a persona for "${body.name}" based on the context above.
+
+RULES:
+1. Output ONLY valid JSON - no explanations before or after
+2. All fields are required
+3. "tone.formality" must be one of: casual, neutral, formal, professional
+4. "tone.warmth" must be one of: cold, neutral, warm, enthusiastic
+5. "tone.directness" must be one of: indirect, balanced, direct, blunt
+6. "tone.verbosity" must be one of: concise, balanced, detailed, verbose
+7. Arrays need at least 2 items each
+
+JSON output:`;
 
         const { text: generatedJson } = await generateText({
             model: ollama(settings.chatModel),

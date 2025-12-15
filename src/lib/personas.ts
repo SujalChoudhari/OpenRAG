@@ -296,7 +296,7 @@ export function setDefaultPersona(id: string): void {
 }
 
 /**
- * Create the default "Knowledge Analyst" persona
+ * Create the default "OpenRAG Assistant" persona
  */
 export function createDefaultPersonas(): void {
     const existing = getAllPersonas();
@@ -304,10 +304,10 @@ export function createDefaultPersonas(): void {
 
     // Default RAG Assistant
     createPersona({
-        id: 'default_analyst',
-        name: 'Knowledge Analyst',
+        id: 'default_assistant',
+        name: 'OpenRAG Assistant',
         avatar: '🧠',
-        role: 'Personal knowledge analyst and assistant',
+        role: 'Your personal knowledge assistant',
         description: 'I help you understand, synthesize, and recall information from your personal knowledge base. I analyze your notes, find connections, and answer questions based on your collected knowledge.',
         tone: {
             formality: 'neutral',
